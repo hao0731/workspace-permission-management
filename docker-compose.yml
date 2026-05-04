@@ -1,0 +1,52 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: workspace-permission-management-mongodb
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: >
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({_id: 'rs0', members: [{ _id: 0, host: 'mongodb:27017' }]}) }"
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    environment:
+      MONGO_INITDB_DATABASE: workspace_permission_management
+    networks:
+      - workspace_permission_management
+
+  mongo-express:
+    image: mongo-express:1.0.2-20-alpine3.19
+    container_name: workspace-permission-management-mongo-express
+    ports:
+      - "9000:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_PORT: 27017
+    depends_on:
+      - mongodb
+    networks:
+      - workspace_permission_management
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: workspace-permission-management-nats
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP monitoring
+    command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
+    volumes:
+      - nats_data:/data
+    networks:
+      - workspace_permission_management
+
+networks:
+  workspace_permission_management:
+    name: workspace_permission_management
+
+volumes:
+  mongodb_data:
+  nats_data:
