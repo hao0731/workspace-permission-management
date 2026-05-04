@@ -1,3 +1,9 @@
 # Local environment
 
 .env
+
+# Frontend
+
+web/node_modules/
+web/.react-router/
+web/build/
