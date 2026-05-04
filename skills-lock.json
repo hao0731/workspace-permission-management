@@ -7,6 +7,12 @@
       "skillPath": "skills/brainstorming/SKILL.md",
       "computedHash": "8df9b47092524833138b58682d03f2e153a242e550d1693657afdbee0cc9cdb0"
     },
+    "checking-design-doc-drift": {
+      "source": "hao0731/hao-loom",
+      "sourceType": "github",
+      "skillPath": "skills/checking-design-doc-drift/SKILL.md",
+      "computedHash": "cc68ed47293faef17cf0ffd9ac76bd8a165a4204844788e1c10b3553afd46ed3"
+    },
     "dispatching-parallel-agents": {
       "source": "obra/superpowers",
       "sourceType": "github",
