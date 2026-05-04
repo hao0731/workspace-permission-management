@@ -9,7 +9,7 @@
 - Configuration: [viper](https://github.com/spf13/viper)
   - local development env file: `.env`
 - Database:
-  - [Cassandra](https://cassandra.apache.org)
+  - [MongoDB](https://www.mongodb.com/)
 - Message broker:
   - [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream)
 - Event envelope: [Cloudevents](https://github.com/cloudevents/sdk-go)
@@ -117,7 +117,7 @@ All packages may import:
 - Do not introduce interfaces prematurely.
 - Handlers may depend on services, transport DTOs/mappers, and domain errors; handlers must not call repositories directly.
 - Transport packages may depend on domain packages for DTO-to-domain mapping, but must not depend on repositories or infrastructure clients.
-- Services may depend on domain packages and consumer-side repository or publisher interfaces; services must not depend on Echo, NATS, NATS JetStream, Cassandra drivers, or transport DTOs.
+- Services may depend on domain packages and consumer-side repository or publisher interfaces; services must not depend on Echo, NATS, NATS JetStream, MongoDB drivers, or transport DTOs.
 - Repositories may depend on database drivers and domain packages, but must not depend on handlers, transport packages, or services.
 - Event publishers and subscribers should expose domain-oriented methods to services and keep broker-specific details in infrastructure packages.
 
@@ -319,20 +319,9 @@ Do not rely only on handler-level validation for business correctness.
 
 ## Repository and data rules
 
-### Cassandra
-
-- Design Cassandra tables around query patterns; do not introduce ad-hoc queries that conflict with the table's partitioning model.
-- Repository methods should represent use-case-oriented operations, not generic database access from services.
-- Keep CQL, driver-specific types, and row scanning inside repository packages.
-- Map database rows into domain models before returning values to services.
-- Do not leak Cassandra consistency levels, paging state, or driver errors outside repository boundaries without mapping them to domain/service-level concepts.
+- Map database documents into domain models before returning values to services.
+- Do not leak paging state, or driver errors outside repository boundaries without mapping them to domain/service-level concepts.
 - Schema changes must include migration or rollout notes, compatibility considerations, and repository tests or integration tests where practical.
-
-### Transactions and consistency
-
-- Document consistency expectations at the service boundary when a workflow spans multiple writes, messages, or external systems.
-- Prefer idempotent operations for retries and event-driven workflows.
-- Make partial-failure behavior explicit when atomicity is not guaranteed.
 
 ---
 
@@ -394,7 +383,7 @@ Do not rely only on handler-level validation for business correctness.
 - Domain rule changes must include unit tests for invariants and edge cases.
 - Service workflow changes must include tests for success, validation failure, dependency failure, and relevant partial-failure behavior.
 - Handler/API changes must include tests for request validation, status codes, response DTOs, and error mapping, plus matching REST Client examples under `examples/api/` for REST APIs.
-- Repository changes must include tests that cover query behavior and mapping. Use integration tests when driver behavior or Cassandra query constraints matter.
+- Repository changes must include tests that cover query behavior and mapping. Use integration tests when driver behavior or MongoDB query constraints matter.
 - Event handler changes must include tests for parsing, idempotency, ack/nack decision behavior, and error classification where practical.
 - Bug fixes must include a failing test or a documented reason why the bug cannot be reproduced in an automated test.
 
