@@ -7,6 +7,7 @@ on:
 
 env:
   GO_VERSION: "1.25.0"
+  NODE_VERSION: "20"
 
 jobs:
   backend-checks:
@@ -35,3 +36,47 @@ jobs:
           version: v2.11
           args: ./...
           verify: false # golangci-lint has an issue for check JSON schema
+
+  frontend-checks:
+    name: Web Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect web changes
+        id: web-changes
+        shell: bash
+        run: |
+          git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" > changed-files.txt
+          if grep -q '^web/' changed-files.txt; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.web-changes.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        if: steps.web-changes.outputs.changed == 'true'
+        working-directory: web
+        run: npm ci
+
+      - name: Run lint
+        if: steps.web-changes.outputs.changed == 'true'
+        working-directory: web
+        run: npm run lint
+
+      - name: Run tests
+        if: steps.web-changes.outputs.changed == 'true'
+        working-directory: web
+        run: npm run test run
