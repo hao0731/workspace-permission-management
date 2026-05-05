@@ -198,7 +198,7 @@ Expected files:
 ```txt
 cmd/function-service/main.go
 
-internal/domain/functionresource/
+internal/domain/resource/
   resource.go
   errors.go
 
@@ -219,18 +219,17 @@ internal/function-service/transport/
   resource_event.go
   resource_response.go
   pagination.go
-  routes.go
 ```
 
 Responsibilities:
 
 - `cmd/function-service/main.go`: composition root, config loading, MongoDB and NATS setup, Echo setup, health route registration, resource route registration, eventbus consumer startup, goroutine lifecycle, and graceful shutdown.
-- `internal/domain/functionresource`: framework-independent resource model and domain errors.
+- `internal/domain/resource`: framework-independent resource model and domain errors.
 - `internal/function-service/config`: environment and `.env` backed config loading through viper, including validation and defaults for optional settings.
 - `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert query, and list query.
 - `internal/function-service/services`: resource upsert and list workflows. Services define consumer-side repository interfaces and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
-- `internal/function-service/handlers`: Echo HTTP handler and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.
-- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, route registration, query validation helpers, cursor token encode/decode, and DTO/domain mapping.
+- `internal/function-service/handlers`: Echo HTTP handler, route registration, and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.
+- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, query validation helpers, cursor token encode/decode, and DTO/domain mapping.
 
 ## Configuration
 
@@ -250,10 +249,20 @@ Required settings:
 
 Optional settings:
 
+- `FUNCTION_SERVICE_ENV`, default `development`. Allowed values are `development` and `production`.
 - `FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT`, default `20`.
 - `FUNCTION_SERVICE_JETSTREAM_MAX_WAIT`, default `5s`.
 - `FUNCTION_SERVICE_SHUTDOWN_TIMEOUT`, default `10s`.
-- `FUNCTION_SERVICE_LOG_FORMAT`, default `text` for development and `json` for production when environment support is added.
+
+Environment behavior:
+
+- `FUNCTION_SERVICE_ENV=development` uses `slog.NewTextHandler`.
+- `FUNCTION_SERVICE_ENV=production` uses `slog.NewJSONHandler`.
+
+Repository environment files:
+
+- Commit `.env.example` with local development defaults and all function-service config keys.
+- Keep `.env` ignored in `.gitignore` so local secrets and machine-specific settings are not committed.
 
 Deployment defaults:
 
@@ -261,6 +270,7 @@ Deployment defaults:
 
 Config validation:
 
+- `FUNCTION_SERVICE_ENV` must be either `development` or `production`.
 - Required string settings must be non-empty.
 - Fetch count must be greater than zero.
 - Durations must be valid and positive.
