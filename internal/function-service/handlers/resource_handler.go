@@ -21,8 +21,22 @@ type ResourceHandler struct {
 	logger  *slog.Logger
 }
 
+type resourcePathParams struct {
+	workspaceID string
+	functionKey string
+	resourceID  string
+}
+
 func NewResourceHandler(service HTTPResourceService, logger *slog.Logger) *ResourceHandler {
 	return &ResourceHandler{service: service, logger: logger}
+}
+
+func newResourcePathParams(c *echo.Context) resourcePathParams {
+	return resourcePathParams{
+		workspaceID: c.Param("workspace_id"),
+		functionKey: c.Param("function_key"),
+		resourceID:  c.Param("resource_id"),
+	}
 }
 
 func RegisterRoutes(e *echo.Echo, handler *ResourceHandler) {
@@ -31,6 +45,7 @@ func RegisterRoutes(e *echo.Echo, handler *ResourceHandler) {
 }
 
 func (h *ResourceHandler) ListResources(c *echo.Context) error {
+	params := newResourcePathParams(c)
 	limit, err := transport.ParseLimit(c.QueryParam("limit"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
@@ -41,8 +56,8 @@ func (h *ResourceHandler) ListResources(c *echo.Context) error {
 	}
 
 	page, err := h.service.ListResources(c.Request().Context(), resource.ListQuery{
-		WorkspaceID: c.Param("workspace_id"),
-		FunctionKey: c.Param("function_key"),
+		WorkspaceID: params.workspaceID,
+		FunctionKey: params.functionKey,
 		Limit:       limit,
 		Cursor:      cursor,
 	})
@@ -71,10 +86,11 @@ func (h *ResourceHandler) ListResources(c *echo.Context) error {
 }
 
 func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
+	params := newResourcePathParams(c)
 	status, err := h.service.DeleteResource(c.Request().Context(), resource.DeleteInput{
-		WorkspaceID: c.Param("workspace_id"),
-		FunctionKey: c.Param("function_key"),
-		ResourceID:  c.Param("resource_id"),
+		WorkspaceID: params.workspaceID,
+		FunctionKey: params.functionKey,
+		ResourceID:  params.resourceID,
 	})
 	if err != nil {
 		if errors.Is(err, resource.ErrInvalidInput) {
@@ -82,9 +98,9 @@ func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
 		}
 		h.logger.Warn("failed to delete resource",
 			"err", err,
-			"workspace_id", c.Param("workspace_id"),
-			"function_key", c.Param("function_key"),
-			"resource_id", c.Param("resource_id"),
+			"workspace_id", params.workspaceID,
+			"function_key", params.functionKey,
+			"resource_id", params.resourceID,
 		)
 		return c.JSON(http.StatusInternalServerError, transport.ErrorResponse{
 			Error: transport.ErrorBody{
@@ -95,9 +111,9 @@ func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
 	}
 	if status == resource.DeleteStatusNotFound {
 		h.logger.Info("resource delete target already absent",
-			"workspace_id", c.Param("workspace_id"),
-			"function_key", c.Param("function_key"),
-			"resource_id", c.Param("resource_id"),
+			"workspace_id", params.workspaceID,
+			"function_key", params.functionKey,
+			"resource_id", params.resourceID,
 		)
 		return c.NoContent(http.StatusNoContent)
 	}

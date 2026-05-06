@@ -53,6 +53,29 @@ func TestNewResourceHandlerUsesProvidedLogger(t *testing.T) {
 	}
 }
 
+func TestNewResourcePathParams(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{
+		{Name: "workspace_id", Value: "workspace-1"},
+		{Name: "function_key", Value: "todo"},
+		{Name: "resource_id", Value: "resource-1"},
+	})
+
+	got := newResourcePathParams(c)
+	if got.workspaceID != "workspace-1" {
+		t.Fatalf("workspaceID = %q, want workspace-1", got.workspaceID)
+	}
+	if got.functionKey != "todo" {
+		t.Fatalf("functionKey = %q, want todo", got.functionKey)
+	}
+	if got.resourceID != "resource-1" {
+		t.Fatalf("resourceID = %q, want resource-1", got.resourceID)
+	}
+}
+
 func TestResourceHandlerListResources(t *testing.T) {
 	service := &fakeHTTPResourceService{
 		page: resource.Page{
