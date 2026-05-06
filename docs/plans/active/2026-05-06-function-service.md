@@ -257,8 +257,8 @@ import (
 type Environment string
 
 const (
-	environment.Development Environment = "development"
-	environment.Production  Environment = "production"
+	Development Environment = "development"
+	Production  Environment = "production"
 )
 
 type Config struct {
