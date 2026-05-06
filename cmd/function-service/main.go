@@ -66,13 +66,21 @@ func run() error {
 	if ensureIndexErr := repository.EnsureIndexes(ctx); ensureIndexErr != nil {
 		return ensureIndexErr
 	}
-	resourceService := services.NewResourceService(repository)
 
 	nc, err := nats.Connect(cfg.NATS.URL)
 	if err != nil {
 		return err
 	}
 	defer nc.Close()
+
+	producer, err := eventbus.NewJetStreamProducer(ctx, nc, logger)
+	if err != nil {
+		return err
+	}
+
+	resourceService := services.NewResourceService(repository,
+		services.WithResourceDeletedPublisher(newResourceDeletedPublisher(producer, cfg.ResourceDeletedSubject)),
+	)
 
 	eventHandler := handlers.NewResourceEventHandler(resourceService, cfg.JetStream.Subject, logger)
 	consumer, err := eventbus.NewJetStreamConsumer(ctx, nc, eventbus.Config{
@@ -88,7 +96,7 @@ func run() error {
 
 	e := echo.New()
 	health.NewHealthManager(processIndicator{}).RegisterRoutes(e)
-	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService))
+	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService, logger))
 
 	errCh := make(chan error, 2)
 	go func() {

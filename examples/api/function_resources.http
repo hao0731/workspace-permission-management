@@ -17,3 +17,9 @@ GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/reso
 
 ### Invalid next token
 GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources?next_token=not-base64
+
+### Delete resource
+DELETE {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources/resource-123
+
+### Delete resource again returns 204 and publishes no event when already absent
+DELETE {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources/resource-123

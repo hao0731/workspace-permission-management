@@ -8,13 +8,46 @@ services:
     volumes:
       - mongodb_data:/data/db
     healthcheck:
-      test: >
-        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({_id: 'rs0', members: [{ _id: 0, host: 'mongodb:27017' }]}) }"
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\""]
       interval: 5s
       timeout: 10s
       retries: 10
     environment:
       MONGO_INITDB_DATABASE: workspace_permission_management
+    networks:
+      - workspace_permission_management
+
+  mongo-init:
+    image: mongo:7.0
+    container_name: workspace-permission-management-mongo-init
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["mongosh"]
+    command:
+      - "--host"
+      - "mongodb:27017"
+      - "--quiet"
+      - "--eval"
+      - |
+        try {
+          rs.status();
+        } catch (error) {
+          rs.initiate({
+            _id: "rs0",
+            members: [{ _id: 0, host: "mongodb:27017" }]
+          });
+        }
+
+        for (let attempt = 0; attempt < 30; attempt++) {
+          if (db.hello().isWritablePrimary) {
+            quit(0);
+          }
+          sleep(1000);
+        }
+
+        throw new Error("MongoDB replica set did not elect a primary");
     networks:
       - workspace_permission_management
 
@@ -27,7 +60,8 @@ services:
       ME_CONFIG_MONGODB_SERVER: mongodb
       ME_CONFIG_MONGODB_PORT: 27017
     depends_on:
-      - mongodb
+      mongo-init:
+        condition: service_completed_successfully
     networks:
       - workspace_permission_management
 
@@ -40,6 +74,48 @@ services:
     command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
     volumes:
       - nats_data:/data
+    networks:
+      - workspace_permission_management
+
+  nats-init:
+    image: natsio/nats-box:0.19.3
+    container_name: workspace-permission-management-nats-init
+    depends_on:
+      - nats
+    restart: "no"
+    environment:
+      FUNCTION_SERVICE_NATS_URL: nats://nats:4222
+      FUNCTION_SERVICE_JETSTREAM_STREAM: ${FUNCTION_SERVICE_JETSTREAM_STREAM:-FUNCTION_RESOURCES}
+      FUNCTION_SERVICE_JETSTREAM_DURABLE: ${FUNCTION_SERVICE_JETSTREAM_DURABLE:-function-service-resource-upserter}
+      FUNCTION_SERVICE_JETSTREAM_SUBJECT: ${FUNCTION_SERVICE_JETSTREAM_SUBJECT:-app.todo.resource.upserted}
+      FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT: ${FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT:-app.todo.resource.deleted}
+    entrypoint: ["/bin/sh", "-euc"]
+    command:
+      - |
+        until nats --server "$$FUNCTION_SERVICE_NATS_URL" stream ls >/dev/null 2>&1; do
+          sleep 1
+        done
+
+        if ! nats --server "$$FUNCTION_SERVICE_NATS_URL" stream info "$$FUNCTION_SERVICE_JETSTREAM_STREAM" >/dev/null 2>&1; then
+          nats --server "$$FUNCTION_SERVICE_NATS_URL" stream add "$$FUNCTION_SERVICE_JETSTREAM_STREAM" \
+            --subjects "$$FUNCTION_SERVICE_JETSTREAM_SUBJECT,$$FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT" \
+            --storage file \
+            --retention limits \
+            --discard old \
+            --replicas 1 \
+            --defaults
+        fi
+
+        if ! nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer info "$$FUNCTION_SERVICE_JETSTREAM_STREAM" "$$FUNCTION_SERVICE_JETSTREAM_DURABLE" >/dev/null 2>&1; then
+          nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer add "$$FUNCTION_SERVICE_JETSTREAM_STREAM" "$$FUNCTION_SERVICE_JETSTREAM_DURABLE" \
+            --filter "$$FUNCTION_SERVICE_JETSTREAM_SUBJECT" \
+            --pull \
+            --ack explicit \
+            --deliver all \
+            --replay instant \
+            --max-deliver=-1 \
+            --defaults
+        fi
     networks:
       - workspace_permission_management
 

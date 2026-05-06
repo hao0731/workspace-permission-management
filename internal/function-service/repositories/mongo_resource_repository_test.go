@@ -45,6 +45,22 @@ func TestBuildListFilterWithCursor(t *testing.T) {
 	}
 }
 
+func TestBuildDeleteFilter(t *testing.T) {
+	got := buildDeleteFilter(resource.DeleteInput{
+		WorkspaceID: "workspace-1",
+		FunctionKey: "todo",
+		ResourceID:  "resource-1",
+	})
+	want := bson.M{
+		"_id":          "resource-1",
+		"workspace_id": "workspace-1",
+		"function_key": "todo",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filter = %#v, want %#v", got, want)
+	}
+}
+
 func TestBuildPageUsesLimitPlusOne(t *testing.T) {
 	items := []resource.Resource{
 		{ID: "resource-1", CreatedAt: time.Date(2026, 5, 5, 7, 31, 0, 0, time.UTC)},

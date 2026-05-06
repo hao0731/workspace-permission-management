@@ -4,7 +4,7 @@
 
 The workspace permission management system uses ABAC to manage access across workspaces, groups, functions, resources, and permissions. Functions are capabilities from integrated systems. Each enabled function exposes resources that can later be targeted by permission rules.
 
-This design introduces `function-service`, a backend service that maintains a MongoDB resource projection from NATS JetStream CloudEvents and exposes a read API for listing function resources in a workspace.
+This design introduces `function-service`, a backend service that maintains a MongoDB resource projection from NATS JetStream CloudEvents, exposes a read API for listing function resources in a workspace, and supports deleting projected resources with a JetStream notification to the owning Function service.
 
 Related concept definitions are documented in [../concept.md](../concept.md).
 
@@ -32,15 +32,20 @@ Policy alignment:
 - Parse CloudEvents and persist resource state into MongoDB `function_resources`.
 - Support idempotent event handling for JetStream at-least-once delivery.
 - Expose `GET /api/v1/workspaces/:workspace_id/functions/:function_key/resources`.
+- Expose `DELETE /api/v1/workspaces/:workspace_id/functions/:function_key/resources/:resource_id`.
+- Delete the matching `function_resources` document by workspace, function, and resource identity.
+- Publish a resource-deleted CloudEvent to JetStream after a document is actually deleted.
+- Keep the resource-deleted event subject configurable.
+- Treat delete requests for missing documents as idempotent success: return `204`, publish no event, and write a structured log entry.
 - Support cursor-based pagination with `limit` and `next_token`.
-- Keep JetStream stream, subject, durable consumer name, fetch count, and wait settings configurable.
+- Keep JetStream stream, upsert subject, durable consumer name, fetch count, and wait settings configurable.
 - Enable health endpoints from `internal/shared/health` in `cmd/function-service/main.go`.
 
 ## Non-Goals
 
 - Do not implement Function registry management.
-- Do not validate whether a workspace or function exists before listing resources.
-- Do not implement delete events.
+- Do not validate whether a workspace or function exists before listing or deleting resources.
+- Do not implement an outbox, background retry worker, or delivery guarantee for resource-deleted events in this phase.
 - Do not implement permission evaluation.
 - Do not implement resource action or resource type management APIs.
 - Do not introduce frontend changes.
@@ -49,12 +54,14 @@ Policy alignment:
 
 Use a resource projection design. `function-service` owns the `function_resources` read model. Integrated systems publish CloudEvents to NATS JetStream, and the service stores the latest accepted resource state in MongoDB.
 
-This keeps the first version focused and testable. Future designs can add Function registry data, delete event handling, or permission evaluation without changing this service's initial responsibility.
+For deletes, use a synchronous delete-and-publish workflow. The service deletes the projected document first, then publishes a resource-deleted CloudEvent to JetStream, and only returns `204` after the publish succeeds. This directly matches the desired API behavior while keeping the first delete implementation small and testable.
 
 Alternatives considered:
 
-- Function registry plus resource projection: more complete, but it expands scope beyond the requested resource ingestion and list API.
-- Generic event ingestion platform: flexible, but over-abstracted for the current single projection and single event contract.
+- Function registry plus resource projection: more complete, but it expands scope beyond the requested resource ingestion, list API, and delete notification.
+- Generic event ingestion platform: flexible, but over-abstracted for the current single projection and narrow event contracts.
+- Outbox plus background retry for resource deletes: improves event delivery reliability, but adds an outbox schema, worker lifecycle, retry state, and more operational surface than this feature currently needs.
+- Publish-before-delete for resource deletes: avoids a deleted document with a failed event publish, but lets downstream services observe a delete event before the projection deletion has succeeded.
 
 ## MongoDB Schema
 
@@ -96,8 +103,9 @@ Rationale:
 
 - The compound index supports the list API filter and sort.
 - `_id` is included as a stable tie-breaker when multiple resources share the same `created_at`.
+- The delete API filters by `_id`, `workspace_id`, and `function_key`. MongoDB's `_id` index supports the lookup, while the additional fields protect against deleting a resource under the wrong workspace or function if an incorrect path is supplied.
 
-## Event Contract
+## Resource Upsert Event Contract
 
 NATS subject and CloudEvent type:
 
@@ -161,7 +169,7 @@ Validation rules:
 - `data.resource_tags` must be a JSON array of strings.
 - `subject` should match `data.resource_id`; mismatch is treated as a poison message.
 
-## Event Handling Semantics
+## Resource Upsert Event Handling Semantics
 
 Resource events are processed as upserts keyed by `resource_id`.
 
@@ -191,6 +199,76 @@ Idempotency:
 - Duplicate delivery of the same event is safe because writes are keyed by `resource_id`.
 - Replaying an event with the same CloudEvent `time` is accepted as the same current state update and leaves the resource in the same logical state.
 
+## Resource Deleted Event Contract
+
+NATS subject and CloudEvent type:
+
+```txt
+app.todo.resource.deleted
+```
+
+The subject remains configurable through `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT`. The default deployment contract is `app.todo.resource.deleted`.
+
+The resource-deleted event is published only after a `function_resources` document is actually deleted. Delete requests that find no matching document return `204` and publish no event.
+
+CloudEvent envelope:
+
+```json
+{
+  "specversion": "1.0",
+  "type": "app.todo.resource.deleted",
+  "source": "function-service",
+  "subject": "<RESOURCE_ID>",
+  "id": "<UUID>",
+  "time": "2026-05-06T10:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "workspace_id": "<WORKSPACE_ID>",
+    "function_key": "<FUNCTION_KEY>",
+    "resource_id": "<RESOURCE_ID>"
+  }
+}
+```
+
+Required data fields:
+
+- `workspace_id`
+- `function_key`
+- `resource_id`
+
+Generation rules:
+
+- `type` must equal the configured resource-deleted subject.
+- `subject` must equal `data.resource_id`.
+- `source` is `function-service`.
+- `datacontenttype` is `application/json`.
+- `id` is generated by the service.
+- `time` is generated by the service at publish time.
+- The service should inject an ID generator and clock at the service boundary so tests can verify the event deterministically.
+
+Payload rationale:
+
+- The event intentionally includes only stable identity fields.
+- Downstream Function services should use those identifiers to perform their own resource cleanup.
+- The event does not include deleted document snapshots such as `display_name`, `resource_type`, or `resource_tags`, because those are projection details and are not needed for the deletion notification.
+
+## Resource Delete Semantics
+
+The delete API is idempotent from the HTTP client's perspective.
+
+Delete behavior:
+
+- Match documents using `_id = resource_id`, `workspace_id = :workspace_id`, and `function_key = :function_key`.
+- If `DeletedCount = 0`, return `204`, publish no event, and log the no-op with `workspace_id`, `function_key`, and `resource_id`.
+- If `DeletedCount = 1`, publish the resource-deleted CloudEvent and return `204` after the publish succeeds.
+
+Publish failure behavior:
+
+- If MongoDB delete succeeds but JetStream publish fails, return `500`.
+- Log the failure with `err`, `workspace_id`, `function_key`, `resource_id`, and the configured delete subject.
+- This phase does not guarantee event delivery after a successful delete. A client retry after this failure may find no document, return `204`, and publish no event.
+- If stronger delivery is required later, add an outbox design instead of hiding retry state inside the handler or service.
+
 ## Service Structure
 
 Expected files:
@@ -217,21 +295,22 @@ internal/function-service/handlers/
 
 internal/function-service/transport/
   resource_event.go
+  resource_deleted_event.go
   resource_response.go
   pagination.go
 ```
 
 Responsibilities:
 
-- `cmd/function-service/main.go`: composition root, config loading, MongoDB and NATS setup, Echo setup, health route registration, resource route registration, eventbus consumer startup, goroutine lifecycle, and graceful shutdown.
+- `cmd/function-service/main.go`: composition root, config loading, MongoDB and NATS setup, JetStream consumer and producer setup, Echo setup, health route registration, resource route registration, eventbus consumer startup, goroutine lifecycle, and graceful shutdown.
 - `internal/domain/resource`: framework-independent resource model and domain errors.
 - `internal/function-service/config`: environment and `.env` backed config loading through viper, including validation and defaults for optional settings.
 - `internal/shared/environment`: shared runtime environment contract (`Development`, `Production`), `IsValidEnvironment`, and `ErrInvalidEnv` for validation consistency across services.
 - `internal/shared/logger`: shared `logger.New(environment, ...options)` factory; supports environment-aware handler selection and optional `WithLevel` log level override.
-- `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert query, and list query.
-- `internal/function-service/services`: resource upsert and list workflows. Services define consumer-side repository interfaces and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
+- `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert query, delete query, and list query.
+- `internal/function-service/services`: resource upsert, list, and delete workflows. Services define consumer-side repository and publisher interfaces and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
 - `internal/function-service/handlers`: Echo HTTP handler, route registration, and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.
-- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, query validation helpers, cursor token encode/decode, and DTO/domain mapping.
+- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, query validation helpers, cursor token encode/decode, resource-deleted event DTO construction, and DTO/domain mapping.
 
 ## Configuration
 
@@ -254,6 +333,7 @@ Optional settings:
 - `FUNCTION_SERVICE_ENV`, default `development`. Allowed values are `development` and `production`.
 - `FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT`, default `20`.
 - `FUNCTION_SERVICE_JETSTREAM_MAX_WAIT`, default `5s`.
+- `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT`, default `app.todo.resource.deleted`.
 - `FUNCTION_SERVICE_SHUTDOWN_TIMEOUT`, default `10s`.
 
 Environment behavior:
@@ -269,11 +349,13 @@ Repository environment files:
 Deployment defaults:
 
 - `FUNCTION_SERVICE_JETSTREAM_SUBJECT=app.todo.resource.upserted`
+- `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT=app.todo.resource.deleted`
 
 Config validation:
 
 - `FUNCTION_SERVICE_ENV` must be either `development` or `production`.
 - Required string settings must be non-empty.
+- `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT` must be non-empty after applying its default.
 - Fetch count must be greater than zero.
 - Durations must be valid and positive.
 - Invalid config fails startup.
@@ -289,14 +371,15 @@ Startup responsibilities:
 3. Connect to MongoDB.
 4. Initialize MongoDB indexes for `function_resources`.
 5. Connect to NATS.
-6. Create an `internal/shared/eventbus` JetStream consumer using configured stream, durable, subject, fetch count, and wait duration.
-7. Create Echo and register:
+6. Create an `internal/shared/eventbus` JetStream producer for resource-deleted events.
+7. Create an `internal/shared/eventbus` JetStream consumer using configured stream, durable, subject, fetch count, and wait duration.
+8. Create Echo and register:
    - `/health/liveness` from `internal/shared/health`.
    - resource API routes.
-8. Run the HTTP server in a goroutine.
-9. Run the JetStream consumer in a goroutine.
-10. Wait for OS signal or runtime error.
-11. Shut down HTTP server, event consumer, NATS, and MongoDB with a timeout context.
+9. Run the HTTP server in a goroutine.
+10. Run the JetStream consumer in a goroutine.
+11. Wait for OS signal or runtime error.
+12. Shut down HTTP server, event consumer, NATS, and MongoDB with a timeout context.
 
 Initial health behavior:
 
@@ -306,7 +389,7 @@ Initial health behavior:
 
 ## API Contract
 
-Endpoint:
+List endpoint:
 
 ```http
 GET /api/v1/workspaces/:workspace_id/functions/:function_key/resources
@@ -354,6 +437,34 @@ Empty response:
     "next_token": ""
   }
 }
+```
+
+Delete endpoint:
+
+```http
+DELETE /api/v1/workspaces/:workspace_id/functions/:function_key/resources/:resource_id
+```
+
+Path parameters:
+
+- `workspace_id`: workspace that owns the projected resource.
+- `function_key`: function that owns the projected resource.
+- `resource_id`: projected resource ID.
+
+Behavior:
+
+- Validate all path parameters as non-empty strings.
+- Delete only when `_id`, `workspace_id`, and `function_key` all match.
+- Return `204 No Content` when a document is deleted and the resource-deleted event is published.
+- Return `204 No Content` when no document matches, publish no event, and write a structured log entry.
+- Return `500` when MongoDB delete fails.
+- Return `500` when JetStream publish fails after a successful MongoDB delete.
+- Never return `404` for a missing delete target in this phase.
+
+Success response:
+
+```http
+HTTP/1.1 204 No Content
 ```
 
 ## Cursor Pagination
@@ -423,6 +534,8 @@ HTTP error mapping:
 - Validation failures return `400`.
 - Repository or unexpected service failures return `500`.
 - Empty result sets return `200`, not `404`.
+- Delete requests with no matching document return `204`, not `404`.
+- Delete publish failures return `500` after logging the failed event publish.
 
 Event handling result mapping:
 
@@ -442,8 +555,9 @@ Event handling result mapping:
 Runtime logging:
 
 - Use `log/slog`.
-- Use structured keys such as `err`, `event_id`, `event_type`, `resource_id`, `workspace_id`, and `function_key`.
+- Use structured keys such as `err`, `event_id`, `event_type`, `event_subject`, `resource_id`, `workspace_id`, and `function_key`.
 - Do not log secrets or full connection strings.
+- Missing delete targets should be logged as an idempotent no-op, not as an application error.
 
 ## Testing Strategy
 
@@ -455,6 +569,10 @@ Domain and service tests:
 - Ignore older event and return a successful outcome.
 - List resources with default limit.
 - List resources with cursor and page info.
+- Delete existing resource publishes a resource-deleted event and returns success.
+- Delete missing resource returns success and does not publish an event.
+- Delete repository failure returns an error.
+- Delete event publish failure returns an error after the repository delete succeeds.
 
 Repository tests:
 
@@ -466,6 +584,8 @@ Repository tests:
 - List query sorts by `created_at DESC, _id DESC`.
 - List query applies cursor boundary correctly.
 - Index initialization creates the compound query index.
+- Delete query filters by `_id`, `workspace_id`, and `function_key`.
+- Delete returns a result that distinguishes deleted and not-found/no-op cases.
 
 Event handler tests:
 
@@ -485,6 +605,17 @@ HTTP handler tests:
 - Invalid `next_token` returns validation error.
 - Empty repository result returns `200` with empty resources.
 - Success response uses `id`, `display_name`, `type`, `resource_tags`, and `page_info`.
+- DELETE success returns `204` with an empty body.
+- DELETE missing document behavior still returns `204`.
+- DELETE validation failure returns the shared validation error shape.
+- DELETE unexpected service or publish failure returns `500`.
+
+Transport tests:
+
+- Resource-deleted CloudEvent uses the configured subject as `type`.
+- Resource-deleted CloudEvent `subject` equals `resource_id`.
+- Resource-deleted CloudEvent data contains only `workspace_id`, `function_key`, and `resource_id`.
+- Resource-deleted CloudEvent generation uses injected ID and time values.
 
 Manual API example:
 
@@ -493,6 +624,8 @@ Manual API example:
 - Include pagination request with `next_token`.
 - Include invalid `limit` example.
 - Include invalid `next_token` example.
+- Include DELETE request for the delete API.
+- Document that DELETE returns `204` both when a document is deleted and when it is already absent.
 
 Verification commands for implementation:
 
@@ -509,6 +642,9 @@ Additional verification may include `go vet ./...` if the implementation plan to
 - Event schema changes must be backward compatible or versioned in a future design.
 - The service assumes JetStream delivers messages at least once; idempotent upsert behavior is required for correctness.
 - The service does not validate workspace or function existence in this phase, so clients should treat an empty list as "no projected resources found" rather than definitive non-existence.
+- The delete API is idempotent for missing projection documents. Clients should not infer workspace, function, or resource existence from a `204` delete response.
+- Downstream Function services must subscribe to the configured resource-deleted subject to perform resource cleanup.
+- This phase does not include an outbox. If a delete succeeds and publish fails, the API returns `500`, but the deleted document will not be available for a later retry to republish the event.
 
 ## Architecture Decisions
 
@@ -536,8 +672,24 @@ Additional verification may include `go vet ./...` if the implementation plan to
    - Rationale: The existing `internal/shared/eventbus` consumer binds and validates configured stream, durable, and subject contracts at startup.
    - Trade-off: Local and deployment environments must provision JetStream resources before starting `function-service`.
 
+7. Return `204` for missing delete targets and publish no event.
+   - Rationale: DELETE remains idempotent and tolerant of repeated requests or already-pruned projections.
+   - Trade-off: Clients cannot distinguish "deleted now" from "was already absent" through the HTTP response.
+
+8. Publish resource-deleted events synchronously after MongoDB deletion.
+   - Rationale: This directly follows the required delete sequence and keeps the design small.
+   - Trade-off: Without an outbox, a publish failure after deletion can leave downstream services uninformed.
+
+9. Keep delete event payload minimal.
+   - Rationale: Downstream Function services only need workspace, function, and resource identity to react to deletion.
+   - Trade-off: Consumers that need display metadata must own or fetch it elsewhere; the delete event will not provide a deleted document snapshot.
+
+10. Use the configured delete subject as the CloudEvent type.
+   - Rationale: This follows the existing upsert event style and keeps subject/type configuration simple.
+   - Trade-off: Changing the configured subject also changes the CloudEvent type contract and must be coordinated with consumers.
+
 ## Implementation Plan Notes
 
-The follow-up implementation plan should be created under `docs/plans/active/` and link back to this design document.
+The follow-up implementation plan should be created or updated under `docs/plans/active/` and link back to this design document.
 
-The plan should implement the service with tests before production code where practical, especially for cursor token validation, event parsing, upsert semantics, and ack/retry/terminate mapping.
+The plan should implement the service with tests before production code where practical, especially for cursor token validation, event parsing, upsert semantics, delete semantics, resource-deleted event generation, synchronous publish behavior, and ack/retry/terminate mapping.

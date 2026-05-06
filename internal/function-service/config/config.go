@@ -11,12 +11,13 @@ import (
 )
 
 type Config struct {
-	Environment     environment.Environment
-	HTTPAddr        string
-	MongoDB         MongoDBConfig
-	NATS            NATSConfig
-	JetStream       JetStreamConfig
-	ShutdownTimeout time.Duration
+	Environment            environment.Environment
+	HTTPAddr               string
+	MongoDB                MongoDBConfig
+	NATS                   NATSConfig
+	JetStream              JetStreamConfig
+	ResourceDeletedSubject string
+	ShutdownTimeout        time.Duration
 }
 
 type MongoDBConfig struct {
@@ -46,6 +47,7 @@ func Load() (Config, error) {
 	v.SetDefault("FUNCTION_SERVICE_ENV", string(environment.Development))
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT", 20)
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT", "5s")
+	v.SetDefault("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT", "app.todo.resource.deleted")
 	v.SetDefault("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT", "10s")
 
 	cfg := Config{
@@ -65,7 +67,8 @@ func Load() (Config, error) {
 			FetchCount: v.GetInt("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT"),
 			MaxWait:    v.GetDuration("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT"),
 		},
-		ShutdownTimeout: v.GetDuration("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT"),
+		ResourceDeletedSubject: v.GetString("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT"),
+		ShutdownTimeout:        v.GetDuration("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -80,13 +83,14 @@ func (c Config) Validate() error {
 	}
 
 	required := map[string]string{
-		"FUNCTION_SERVICE_HTTP_ADDR":         c.HTTPAddr,
-		"FUNCTION_SERVICE_MONGODB_URI":       c.MongoDB.URI,
-		"FUNCTION_SERVICE_MONGODB_DATABASE":  c.MongoDB.Database,
-		"FUNCTION_SERVICE_NATS_URL":          c.NATS.URL,
-		"FUNCTION_SERVICE_JETSTREAM_STREAM":  c.JetStream.Stream,
-		"FUNCTION_SERVICE_JETSTREAM_DURABLE": c.JetStream.Durable,
-		"FUNCTION_SERVICE_JETSTREAM_SUBJECT": c.JetStream.Subject,
+		"FUNCTION_SERVICE_HTTP_ADDR":                c.HTTPAddr,
+		"FUNCTION_SERVICE_MONGODB_URI":              c.MongoDB.URI,
+		"FUNCTION_SERVICE_MONGODB_DATABASE":         c.MongoDB.Database,
+		"FUNCTION_SERVICE_NATS_URL":                 c.NATS.URL,
+		"FUNCTION_SERVICE_JETSTREAM_STREAM":         c.JetStream.Stream,
+		"FUNCTION_SERVICE_JETSTREAM_DURABLE":        c.JetStream.Durable,
+		"FUNCTION_SERVICE_JETSTREAM_SUBJECT":        c.JetStream.Subject,
+		"FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT": c.ResourceDeletedSubject,
 	}
 	for key, value := range required {
 		if strings.TrimSpace(value) == "" {
