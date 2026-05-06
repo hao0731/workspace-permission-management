@@ -35,6 +35,20 @@ type ListQuery struct {
 	Cursor      *Cursor
 }
 
+type DeleteInput struct {
+	WorkspaceID string
+	FunctionKey string
+	ResourceID  string
+}
+
+type DeletedEvent struct {
+	WorkspaceID string
+	FunctionKey string
+	ResourceID  string
+	EventID     string
+	EventTime   time.Time
+}
+
 type Page struct {
 	Resources   []Resource
 	HasNextPage bool
@@ -43,8 +57,15 @@ type Page struct {
 
 type UpsertStatus string
 
+type DeleteStatus string
+
 const (
 	UpsertStatusInserted UpsertStatus = "inserted"
 	UpsertStatusUpdated  UpsertStatus = "updated"
 	UpsertStatusIgnored  UpsertStatus = "ignored"
+)
+
+const (
+	DeleteStatusDeleted  DeleteStatus = "deleted"
+	DeleteStatusNotFound DeleteStatus = "not_found"
 )
