@@ -541,3 +541,7 @@ Additional verification may include `go vet ./...` if the implementation plan to
 The follow-up implementation plan should be created under `docs/plans/active/` and link back to this design document.
 
 The plan should implement the service with tests before production code where practical, especially for cursor token validation, event parsing, upsert semantics, and ack/retry/terminate mapping.
+
+## Related Designs
+
+- Resource deletion extension: [./function-service-resource-delete.md](./function-service-resource-delete.md)
