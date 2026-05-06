@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
@@ -12,18 +13,21 @@ import (
 
 type HTTPResourceService interface {
 	ListResources(ctx context.Context, query resource.ListQuery) (resource.Page, error)
+	DeleteResource(ctx context.Context, input resource.DeleteInput) (resource.DeleteStatus, error)
 }
 
 type ResourceHandler struct {
 	service HTTPResourceService
+	logger  *slog.Logger
 }
 
 func NewResourceHandler(service HTTPResourceService) *ResourceHandler {
-	return &ResourceHandler{service: service}
+	return &ResourceHandler{service: service, logger: slog.Default()}
 }
 
 func RegisterRoutes(e *echo.Echo, handler *ResourceHandler) {
 	e.GET("/api/v1/workspaces/:workspace_id/functions/:function_key/resources", handler.ListResources)
+	e.DELETE("/api/v1/workspaces/:workspace_id/functions/:function_key/resources/:resource_id", handler.DeleteResource)
 }
 
 func (h *ResourceHandler) ListResources(c *echo.Context) error {
@@ -64,6 +68,40 @@ func (h *ResourceHandler) ListResources(c *echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, response)
+}
+
+func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
+	status, err := h.service.DeleteResource(c.Request().Context(), resource.DeleteInput{
+		WorkspaceID: c.Param("workspace_id"),
+		FunctionKey: c.Param("function_key"),
+		ResourceID:  c.Param("resource_id"),
+	})
+	if err != nil {
+		if errors.Is(err, resource.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to delete resource",
+			"err", err,
+			"workspace_id", c.Param("workspace_id"),
+			"function_key", c.Param("function_key"),
+			"resource_id", c.Param("resource_id"),
+		)
+		return c.JSON(http.StatusInternalServerError, transport.ErrorResponse{
+			Error: transport.ErrorBody{
+				Code:    "internal_error",
+				Message: "Internal server error",
+			},
+		})
+	}
+	if status == resource.DeleteStatusNotFound {
+		h.logger.Info("resource delete target already absent",
+			"workspace_id", c.Param("workspace_id"),
+			"function_key", c.Param("function_key"),
+			"resource_id", c.Param("resource_id"),
+		)
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func validationError(message string) transport.ErrorResponse {

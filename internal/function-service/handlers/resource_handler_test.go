@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,9 +14,12 @@ import (
 )
 
 type fakeHTTPResourceService struct {
-	query resource.ListQuery
-	page  resource.Page
-	err   error
+	query        resource.ListQuery
+	page         resource.Page
+	err          error
+	deleteInput  resource.DeleteInput
+	deleteStatus resource.DeleteStatus
+	deleteErr    error
 }
 
 func (f *fakeHTTPResourceService) ListResources(ctx context.Context, query resource.ListQuery) (resource.Page, error) {
@@ -24,6 +28,14 @@ func (f *fakeHTTPResourceService) ListResources(ctx context.Context, query resou
 		return resource.Page{}, f.err
 	}
 	return f.page, nil
+}
+
+func (f *fakeHTTPResourceService) DeleteResource(ctx context.Context, input resource.DeleteInput) (resource.DeleteStatus, error) {
+	f.deleteInput = input
+	if f.deleteErr != nil {
+		return "", f.deleteErr
+	}
+	return f.deleteStatus, nil
 }
 
 func TestResourceHandlerListResources(t *testing.T) {
@@ -72,5 +84,71 @@ func TestResourceHandlerRejectsInvalidLimit(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestResourceHandlerDeleteResource(t *testing.T) {
+	service := &fakeHTTPResourceService{deleteStatus: resource.DeleteStatusDeleted}
+	e := echo.New()
+	handler := NewResourceHandler(service)
+	RegisterRoutes(e, handler)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("body len = %d, want 0", rec.Body.Len())
+	}
+	if service.deleteInput.WorkspaceID != "workspace-1" || service.deleteInput.FunctionKey != "todo" || service.deleteInput.ResourceID != "resource-1" {
+		t.Fatalf("delete input = %+v, want workspace-1/todo/resource-1", service.deleteInput)
+	}
+}
+
+func TestResourceHandlerDeleteMissingResourceStillReturnsNoContent(t *testing.T) {
+	service := &fakeHTTPResourceService{deleteStatus: resource.DeleteStatusNotFound}
+	e := echo.New()
+	handler := NewResourceHandler(service)
+	RegisterRoutes(e, handler)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+func TestResourceHandlerDeleteValidationError(t *testing.T) {
+	service := &fakeHTTPResourceService{deleteErr: resource.ErrInvalidInput}
+	e := echo.New()
+	handler := NewResourceHandler(service)
+	RegisterRoutes(e, handler)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestResourceHandlerDeleteServiceFailure(t *testing.T) {
+	service := &fakeHTTPResourceService{deleteErr: errors.New("publish failed")}
+	e := echo.New()
+	handler := NewResourceHandler(service)
+	RegisterRoutes(e, handler)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }
