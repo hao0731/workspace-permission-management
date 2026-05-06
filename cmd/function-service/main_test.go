@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 
 	"github.com/hao0731/workspace-permission-management/internal/shared/environment"
@@ -29,7 +28,7 @@ func TestProcessIndicator(t *testing.T) {
 }
 
 func TestLoggerNewReturnsSlogLogger(t *testing.T) {
-	var logger *slog.Logger = sharedlogger.New(environment.Development)
+	logger := sharedlogger.New(environment.Development)
 	if logger == nil {
 		t.Fatal("logger = nil, want slog logger")
 	}

@@ -57,14 +57,14 @@ func run() error {
 	defer func() {
 		disconnectCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
-		if err := mongoClient.Disconnect(disconnectCtx); err != nil {
-			logger.Warn("failed to disconnect mongodb", "err", err)
+		if disconnectErr := mongoClient.Disconnect(disconnectCtx); disconnectErr != nil {
+			logger.Warn("failed to disconnect mongodb", "err", disconnectErr)
 		}
 	}()
 
 	repository := repositories.NewMongoResourceRepository(mongoClient.Database(cfg.MongoDB.Database))
-	if err := repository.EnsureIndexes(ctx); err != nil {
-		return err
+	if ensureIndexErr := repository.EnsureIndexes(ctx); ensureIndexErr != nil {
+		return ensureIndexErr
 	}
 	resourceService := services.NewResourceService(repository)
 
