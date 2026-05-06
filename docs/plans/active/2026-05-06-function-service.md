@@ -2012,7 +2012,7 @@ func TestNewLogger(t *testing.T) {
 	if logger.New(environment.Development) == nil {
 		t.Fatal("development logger = nil, want logger")
 	}
-	if logger.New(serviceconfig.environment.Production) == nil {
+	if logger.New(environment.Production) == nil {
 		t.Fatal("production logger = nil, want logger")
 	}
 }
