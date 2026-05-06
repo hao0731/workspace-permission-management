@@ -12,16 +12,20 @@ import (
 type fakeResourceRepository struct {
 	upsertStatus resource.UpsertStatus
 	upsertInput  resource.UpsertInput
+	upsertCalls  int
 	upsertErr    error
 	listQuery    resource.ListQuery
+	listCalls    int
 	listPage     resource.Page
 	listErr      error
 	deleteStatus resource.DeleteStatus
 	deleteInput  resource.DeleteInput
+	deleteCalls  int
 	deleteErr    error
 }
 
 func (f *fakeResourceRepository) Upsert(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error) {
+	f.upsertCalls++
 	f.upsertInput = input
 	if f.upsertErr != nil {
 		return "", f.upsertErr
@@ -30,6 +34,7 @@ func (f *fakeResourceRepository) Upsert(ctx context.Context, input resource.Upse
 }
 
 func (f *fakeResourceRepository) List(ctx context.Context, query resource.ListQuery) (resource.Page, error) {
+	f.listCalls++
 	f.listQuery = query
 	if f.listErr != nil {
 		return resource.Page{}, f.listErr
@@ -38,6 +43,7 @@ func (f *fakeResourceRepository) List(ctx context.Context, query resource.ListQu
 }
 
 func (f *fakeResourceRepository) Delete(ctx context.Context, input resource.DeleteInput) (resource.DeleteStatus, error) {
+	f.deleteCalls++
 	f.deleteInput = input
 	if f.deleteErr != nil {
 		return "", f.deleteErr
@@ -86,7 +92,8 @@ func TestResourceServiceUpsertResource(t *testing.T) {
 }
 
 func TestResourceServiceRejectsInvalidUpsertInput(t *testing.T) {
-	service := NewResourceService(&fakeResourceRepository{})
+	repo := &fakeResourceRepository{}
+	service := NewResourceService(repo)
 
 	_, err := service.UpsertResource(context.Background(), resource.UpsertInput{
 		ID:          "",
@@ -99,6 +106,9 @@ func TestResourceServiceRejectsInvalidUpsertInput(t *testing.T) {
 	})
 	if !errors.Is(err, resource.ErrInvalidInput) {
 		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	}
+	if repo.upsertCalls != 0 {
+		t.Fatalf("repo upsert calls = %d, want 0", repo.upsertCalls)
 	}
 }
 
@@ -133,7 +143,8 @@ func TestResourceServiceListResources(t *testing.T) {
 }
 
 func TestResourceServiceRejectsInvalidListQuery(t *testing.T) {
-	service := NewResourceService(&fakeResourceRepository{})
+	repo := &fakeResourceRepository{}
+	service := NewResourceService(repo)
 
 	_, err := service.ListResources(context.Background(), resource.ListQuery{
 		WorkspaceID: "workspace-1",
@@ -142,6 +153,9 @@ func TestResourceServiceRejectsInvalidListQuery(t *testing.T) {
 	})
 	if !errors.Is(err, resource.ErrInvalidInput) {
 		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	}
+	if repo.listCalls != 0 {
+		t.Fatalf("repo list calls = %d, want 0", repo.listCalls)
 	}
 }
 
@@ -205,7 +219,9 @@ func TestResourceServiceDeleteResourceMissingDoesNotPublish(t *testing.T) {
 }
 
 func TestResourceServiceDeleteResourceRejectsInvalidInput(t *testing.T) {
-	service := NewResourceService(&fakeResourceRepository{})
+	repo := &fakeResourceRepository{}
+	publisher := &fakeResourceDeletedPublisher{}
+	service := NewResourceService(repo, WithResourceDeletedPublisher(publisher))
 
 	_, err := service.DeleteResource(context.Background(), resource.DeleteInput{
 		WorkspaceID: "workspace-1",
@@ -214,6 +230,12 @@ func TestResourceServiceDeleteResourceRejectsInvalidInput(t *testing.T) {
 	})
 	if !errors.Is(err, resource.ErrInvalidInput) {
 		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	}
+	if repo.deleteCalls != 0 {
+		t.Fatalf("repo delete calls = %d, want 0", repo.deleteCalls)
+	}
+	if publisher.calls != 0 {
+		t.Fatalf("publisher calls = %d, want 0", publisher.calls)
 	}
 }
 

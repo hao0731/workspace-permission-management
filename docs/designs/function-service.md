@@ -21,6 +21,7 @@ Policy alignment:
 
 - Handlers remain thin and only perform transport parsing, validation, service invocation, and response or ack mapping.
 - Domain and service logic stay independent of Echo, MongoDB, NATS, and JetStream types.
+- Domain resource input/query invariant validation is owned by domain `Validate` methods; transport-only parsing remains in transport packages.
 - MongoDB access is isolated behind repository code.
 - CloudEvents, API payloads, pagination, and MongoDB schema are treated as explicit contracts.
 - This design document is stored under `docs/designs/`.
@@ -303,14 +304,30 @@ internal/function-service/transport/
 Responsibilities:
 
 - `cmd/function-service/main.go`: composition root, config loading, MongoDB and NATS setup, JetStream consumer and producer setup, Echo setup, health route registration, resource route registration, eventbus consumer startup, goroutine lifecycle, and graceful shutdown.
-- `internal/domain/resource`: framework-independent resource model and domain errors.
+- `internal/domain/resource`: framework-independent resource model, resource input/query validation methods, and domain errors.
 - `internal/function-service/config`: environment and `.env` backed config loading through viper, including validation and defaults for optional settings.
 - `internal/shared/environment`: shared runtime environment contract (`Development`, `Production`), `IsValidEnvironment`, and `ErrInvalidEnv` for validation consistency across services.
 - `internal/shared/logger`: shared `logger.New(environment, ...options)` factory; supports environment-aware handler selection and optional `WithLevel` log level override.
 - `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert query, delete query, and list query.
-- `internal/function-service/services`: resource upsert, list, and delete workflows. Services define consumer-side repository and publisher interfaces and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
+- `internal/function-service/services`: resource upsert, list, and delete workflows. Services call domain input/query `Validate` methods before repositories or publishers, define consumer-side repository and publisher interfaces, and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
 - `internal/function-service/handlers`: Echo HTTP handler, route registration, and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.
-- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, query validation helpers, cursor token encode/decode, resource-deleted event DTO construction, and DTO/domain mapping.
+- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, HTTP query parsing and transport-only validation helpers, cursor token encode/decode, resource-deleted event DTO construction, and DTO/domain mapping.
+
+## Resource Input Validation Boundary
+
+Resource input and query invariant validation is defined in [resource-input-validation-refactor.md](resource-input-validation-refactor.md).
+
+The domain package owns:
+
+- `UpsertInput.Validate()`
+- `DeleteInput.Validate()`
+- `ListQuery.Validate()`
+
+These methods validate framework-independent service workflow invariants such as non-empty resource identity fields, required upsert fields, non-empty resource tags, non-zero event time, positive list limit, and valid cursor fields. They must return errors wrapping `resource.ErrInvalidInput` so HTTP and event handlers can keep their existing error mapping.
+
+Transport packages continue to own transport-specific parsing and validation, including HTTP `limit` parsing and max-limit enforcement, `next_token` decoding, CloudEvent envelope validation, and DTO/domain mapping.
+
+Services should call the domain `Validate` methods before invoking repositories or publishers. Services should not keep separate private helper functions that duplicate those domain input/query invariant checks.
 
 ## Configuration
 
@@ -687,6 +704,10 @@ Additional verification may include `go vet ./...` if the implementation plan to
 10. Use the configured delete subject as the CloudEvent type.
    - Rationale: This follows the existing upsert event style and keeps subject/type configuration simple.
    - Trade-off: Changing the configured subject also changes the CloudEvent type contract and must be coordinated with consumers.
+
+11. Put resource input/query invariant validation on domain `Validate` methods.
+   - Rationale: `UpsertInput`, `DeleteInput`, and `ListQuery` carry framework-independent service workflow values, so their invariant checks should be discoverable from those types and reusable across service entry points.
+   - Trade-off: The domain package owns basic string/time validation helpers, while transport packages still own HTTP and CloudEvent parsing concerns.
 
 ## Implementation Plan Notes
 
