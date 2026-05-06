@@ -142,6 +142,17 @@ func (r *MongoResourceRepository) List(ctx context.Context, query resource.ListQ
 	return buildPage(resources, query.Limit), nil
 }
 
+func (r *MongoResourceRepository) Delete(ctx context.Context, input resource.DeleteInput) (resource.DeleteStatus, error) {
+	result, err := r.collection.DeleteOne(ctx, buildDeleteFilter(input))
+	if err != nil {
+		return "", fmt.Errorf("delete resource: %w", err)
+	}
+	if result.DeletedCount == 0 {
+		return resource.DeleteStatusNotFound, nil
+	}
+	return resource.DeleteStatusDeleted, nil
+}
+
 func buildListFilter(query resource.ListQuery) bson.M {
 	filter := bson.M{
 		"workspace_id": query.WorkspaceID,
@@ -154,6 +165,14 @@ func buildListFilter(query resource.ListQuery) bson.M {
 		}
 	}
 	return filter
+}
+
+func buildDeleteFilter(input resource.DeleteInput) bson.M {
+	return bson.M{
+		"_id":          input.ResourceID,
+		"workspace_id": input.WorkspaceID,
+		"function_key": input.FunctionKey,
+	}
 }
 
 func buildPage(items []resource.Resource, limit int) resource.Page {
