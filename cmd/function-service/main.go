@@ -96,7 +96,7 @@ func run() error {
 
 	e := echo.New()
 	health.NewHealthManager(processIndicator{}).RegisterRoutes(e)
-	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService))
+	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService, logger))
 
 	errCh := make(chan error, 2)
 	go func() {

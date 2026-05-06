@@ -21,8 +21,8 @@ type ResourceHandler struct {
 	logger  *slog.Logger
 }
 
-func NewResourceHandler(service HTTPResourceService) *ResourceHandler {
-	return &ResourceHandler{service: service, logger: slog.Default()}
+func NewResourceHandler(service HTTPResourceService, logger *slog.Logger) *ResourceHandler {
+	return &ResourceHandler{service: service, logger: logger}
 }
 
 func RegisterRoutes(e *echo.Echo, handler *ResourceHandler) {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,6 +40,19 @@ func (f *fakeHTTPResourceService) DeleteResource(ctx context.Context, input reso
 	return f.deleteStatus, nil
 }
 
+func newTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestNewResourceHandlerUsesProvidedLogger(t *testing.T) {
+	logger := newTestLogger()
+	handler := NewResourceHandler(&fakeHTTPResourceService{}, logger)
+
+	if handler.logger != logger {
+		t.Fatal("handler logger did not use provided logger")
+	}
+}
+
 func TestResourceHandlerListResources(t *testing.T) {
 	service := &fakeHTTPResourceService{
 		page: resource.Page{
@@ -51,7 +66,7 @@ func TestResourceHandlerListResources(t *testing.T) {
 		},
 	}
 	e := echo.New()
-	handler := NewResourceHandler(service)
+	handler := NewResourceHandler(service, newTestLogger())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/resources", nil)
@@ -75,7 +90,7 @@ func TestResourceHandlerListResources(t *testing.T) {
 
 func TestResourceHandlerRejectsInvalidLimit(t *testing.T) {
 	e := echo.New()
-	handler := NewResourceHandler(&fakeHTTPResourceService{})
+	handler := NewResourceHandler(&fakeHTTPResourceService{}, newTestLogger())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/resources?limit=51", nil)
@@ -90,7 +105,7 @@ func TestResourceHandlerRejectsInvalidLimit(t *testing.T) {
 func TestResourceHandlerDeleteResource(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteStatus: resource.DeleteStatusDeleted}
 	e := echo.New()
-	handler := NewResourceHandler(service)
+	handler := NewResourceHandler(service, newTestLogger())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
@@ -111,7 +126,7 @@ func TestResourceHandlerDeleteResource(t *testing.T) {
 func TestResourceHandlerDeleteMissingResourceStillReturnsNoContent(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteStatus: resource.DeleteStatusNotFound}
 	e := echo.New()
-	handler := NewResourceHandler(service)
+	handler := NewResourceHandler(service, newTestLogger())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
@@ -126,7 +141,7 @@ func TestResourceHandlerDeleteMissingResourceStillReturnsNoContent(t *testing.T)
 func TestResourceHandlerDeleteValidationError(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteErr: resource.ErrInvalidInput}
 	e := echo.New()
-	handler := NewResourceHandler(service)
+	handler := NewResourceHandler(service, newTestLogger())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
@@ -141,7 +156,7 @@ func TestResourceHandlerDeleteValidationError(t *testing.T) {
 func TestResourceHandlerDeleteServiceFailure(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteErr: errors.New("publish failed")}
 	e := echo.New()
-	handler := NewResourceHandler(service)
+	handler := NewResourceHandler(service, newTestLogger())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
