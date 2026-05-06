@@ -1,0 +1,19 @@
+@baseUrl = http://localhost:8080
+@workspaceId = workspace-1
+@functionKey = todo
+@nextToken = eyJjcmVhdGVkX2F0IjoiMjAyNi0wNS0wNVQwNzozMTowMFoiLCJpZCI6InJlc291cmNlLTEyMyJ9
+
+### List resources
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources
+
+### List resources with explicit limit
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources?limit=50
+
+### List next page
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources?limit=20&next_token={{nextToken}}
+
+### Invalid limit
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources?limit=51
+
+### Invalid next token
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/resources?next_token=not-base64
