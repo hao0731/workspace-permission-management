@@ -2009,7 +2009,7 @@ import (
 )
 
 func TestNewLogger(t *testing.T) {
-	if logger.New(serviceconfig.environment.Development) == nil {
+	if logger.New(environment.Development) == nil {
 		t.Fatal("development logger = nil, want logger")
 	}
 	if logger.New(serviceconfig.environment.Production) == nil {
