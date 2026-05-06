@@ -2,17 +2,17 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 
-	serviceconfig "github.com/hao0731/workspace-permission-management/internal/function-service/config"
+	"github.com/hao0731/workspace-permission-management/internal/shared/environment"
+	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
 )
 
-func TestNewLogger(t *testing.T) {
-	if newLogger(serviceconfig.EnvironmentDevelopment) == nil {
+func TestLoggerNew(t *testing.T) {
+	if sharedlogger.New(environment.Development) == nil {
 		t.Fatal("development logger = nil, want logger")
 	}
-	if newLogger(serviceconfig.EnvironmentProduction) == nil {
+	if sharedlogger.New(environment.Production) == nil {
 		t.Fatal("production logger = nil, want logger")
 	}
 }
@@ -27,8 +27,8 @@ func TestProcessIndicator(t *testing.T) {
 	}
 }
 
-func TestNewLoggerReturnsSlogLogger(t *testing.T) {
-	var logger *slog.Logger = newLogger(serviceconfig.EnvironmentDevelopment)
+func TestLoggerNewReturnsSlogLogger(t *testing.T) {
+	logger := sharedlogger.New(environment.Development)
 	if logger == nil {
 		t.Fatal("logger = nil, want slog logger")
 	}

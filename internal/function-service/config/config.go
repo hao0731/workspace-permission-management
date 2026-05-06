@@ -6,17 +6,12 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
-)
 
-type Environment string
-
-const (
-	EnvironmentDevelopment Environment = "development"
-	EnvironmentProduction  Environment = "production"
+	"github.com/hao0731/workspace-permission-management/internal/shared/environment"
 )
 
 type Config struct {
-	Environment     Environment
+	Environment     environment.Environment
 	HTTPAddr        string
 	MongoDB         MongoDBConfig
 	NATS            NATSConfig
@@ -48,13 +43,13 @@ func Load() (Config, error) {
 	_ = v.ReadInConfig()
 	v.AutomaticEnv()
 
-	v.SetDefault("FUNCTION_SERVICE_ENV", string(EnvironmentDevelopment))
+	v.SetDefault("FUNCTION_SERVICE_ENV", string(environment.Development))
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT", 20)
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT", "5s")
 	v.SetDefault("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT", "10s")
 
 	cfg := Config{
-		Environment: Environment(v.GetString("FUNCTION_SERVICE_ENV")),
+		Environment: environment.Environment(v.GetString("FUNCTION_SERVICE_ENV")),
 		HTTPAddr:    v.GetString("FUNCTION_SERVICE_HTTP_ADDR"),
 		MongoDB: MongoDBConfig{
 			URI:      v.GetString("FUNCTION_SERVICE_MONGODB_URI"),
@@ -80,8 +75,8 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if c.Environment != EnvironmentDevelopment && c.Environment != EnvironmentProduction {
-		return fmt.Errorf("FUNCTION_SERVICE_ENV must be %q or %q", EnvironmentDevelopment, EnvironmentProduction)
+	if !environment.IsValidEnvironment(c.Environment) {
+		return fmt.Errorf("%w: FUNCTION_SERVICE_ENV must be %q or %q", environment.ErrInvalidEnv, environment.Development, environment.Production)
 	}
 
 	required := map[string]string{
