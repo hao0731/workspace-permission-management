@@ -3,6 +3,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/hao0731/workspace-permission-management/internal/shared/environment"
 )
 
 func TestLoadReadsRequiredEnvironment(t *testing.T) {
@@ -22,8 +24,8 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load error = %v, want nil", err)
 	}
-	if cfg.Environment != EnvironmentProduction {
-		t.Fatalf("Environment = %q, want %q", cfg.Environment, EnvironmentProduction)
+	if cfg.Environment != environment.Production {
+		t.Fatalf("Environment = %q, want %q", cfg.Environment, environment.Production)
 	}
 	if cfg.HTTPAddr != ":9090" {
 		t.Fatalf("HTTPAddr = %q, want :9090", cfg.HTTPAddr)
@@ -70,8 +72,8 @@ func TestLoadAppliesOptionalDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load error = %v, want nil", err)
 	}
-	if cfg.Environment != EnvironmentDevelopment {
-		t.Fatalf("Environment = %q, want %q", cfg.Environment, EnvironmentDevelopment)
+	if cfg.Environment != environment.Development {
+		t.Fatalf("Environment = %q, want %q", cfg.Environment, environment.Development)
 	}
 	if cfg.JetStream.FetchCount != 20 {
 		t.Fatalf("JetStream.FetchCount = %d, want 20", cfg.JetStream.FetchCount)

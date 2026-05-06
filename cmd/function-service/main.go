@@ -15,6 +15,7 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/function-service/services"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 	"github.com/hao0731/workspace-permission-management/internal/shared/health"
+	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
 	"github.com/labstack/echo/v5"
 	"github.com/nats-io/nats.go"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -43,7 +44,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := newLogger(cfg.Environment)
+	logger := sharedlogger.New(cfg.Environment)
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -114,11 +115,4 @@ func run() error {
 		}
 	}
 	return nil
-}
-
-func newLogger(env config.Environment) *slog.Logger {
-	if env == config.EnvironmentProduction {
-		return slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	}
-	return slog.New(slog.NewTextHandler(os.Stdout, nil))
 }

@@ -226,6 +226,8 @@ Responsibilities:
 - `cmd/function-service/main.go`: composition root, config loading, MongoDB and NATS setup, Echo setup, health route registration, resource route registration, eventbus consumer startup, goroutine lifecycle, and graceful shutdown.
 - `internal/domain/resource`: framework-independent resource model and domain errors.
 - `internal/function-service/config`: environment and `.env` backed config loading through viper, including validation and defaults for optional settings.
+- `internal/shared/environment`: shared runtime environment contract (`Development`, `Production`), `IsValidEnvironment`, and `ErrInvalidEnv` for validation consistency across services.
+- `internal/shared/logger`: shared `logger.New(environment, ...options)` factory; supports environment-aware handler selection and optional `WithLevel` log level override.
 - `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert query, and list query.
 - `internal/function-service/services`: resource upsert and list workflows. Services define consumer-side repository interfaces and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
 - `internal/function-service/handlers`: Echo HTTP handler, route registration, and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.

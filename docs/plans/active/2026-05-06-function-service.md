@@ -138,8 +138,8 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load error = %v, want nil", err)
 	}
-	if cfg.Environment != EnvironmentProduction {
-		t.Fatalf("Environment = %q, want %q", cfg.Environment, EnvironmentProduction)
+	if cfg.Environment != environment.Production {
+		t.Fatalf("Environment = %q, want %q", cfg.Environment, environment.Production)
 	}
 	if cfg.HTTPAddr != ":9090" {
 		t.Fatalf("HTTPAddr = %q, want :9090", cfg.HTTPAddr)
@@ -186,8 +186,8 @@ func TestLoadAppliesOptionalDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load error = %v, want nil", err)
 	}
-	if cfg.Environment != EnvironmentDevelopment {
-		t.Fatalf("Environment = %q, want %q", cfg.Environment, EnvironmentDevelopment)
+	if cfg.Environment != environment.Development {
+		t.Fatalf("Environment = %q, want %q", cfg.Environment, environment.Development)
 	}
 	if cfg.JetStream.FetchCount != 20 {
 		t.Fatalf("JetStream.FetchCount = %d, want 20", cfg.JetStream.FetchCount)
@@ -257,8 +257,8 @@ import (
 type Environment string
 
 const (
-	EnvironmentDevelopment Environment = "development"
-	EnvironmentProduction  Environment = "production"
+	environment.Development Environment = "development"
+	environment.Production  Environment = "production"
 )
 
 type Config struct {
@@ -294,7 +294,7 @@ func Load() (Config, error) {
 	_ = v.ReadInConfig()
 	v.AutomaticEnv()
 
-	v.SetDefault("FUNCTION_SERVICE_ENV", string(EnvironmentDevelopment))
+	v.SetDefault("FUNCTION_SERVICE_ENV", string(environment.Development))
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT", 20)
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT", "5s")
 	v.SetDefault("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT", "10s")
@@ -326,8 +326,8 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if c.Environment != EnvironmentDevelopment && c.Environment != EnvironmentProduction {
-		return fmt.Errorf("FUNCTION_SERVICE_ENV must be %q or %q", EnvironmentDevelopment, EnvironmentProduction)
+	if c.Environment != environment.Development && c.Environment != environment.Production {
+		return fmt.Errorf("FUNCTION_SERVICE_ENV must be %q or %q", environment.Development, environment.Production)
 	}
 
 	required := map[string]string{
@@ -2009,10 +2009,10 @@ import (
 )
 
 func TestNewLogger(t *testing.T) {
-	if newLogger(serviceconfig.EnvironmentDevelopment) == nil {
+	if logger.New(serviceconfig.environment.Development) == nil {
 		t.Fatal("development logger = nil, want logger")
 	}
-	if newLogger(serviceconfig.EnvironmentProduction) == nil {
+	if logger.New(serviceconfig.environment.Production) == nil {
 		t.Fatal("production logger = nil, want logger")
 	}
 }
@@ -2028,7 +2028,7 @@ func TestProcessIndicator(t *testing.T) {
 }
 
 func TestNewLoggerReturnsSlogLogger(t *testing.T) {
-	var logger *slog.Logger = newLogger(serviceconfig.EnvironmentDevelopment)
+	var logger *slog.Logger = logger.New(serviceconfig.environment.Development)
 	if logger == nil {
 		t.Fatal("logger = nil, want slog logger")
 	}
@@ -2043,7 +2043,7 @@ Run:
 go test ./cmd/function-service
 ```
 
-Expected: FAIL because `newLogger` and `processIndicator` are not defined.
+Expected: FAIL because `logger.New` and `processIndicator` are not defined.
 
 - [ ] **Step 3: Implement `cmd/function-service/main.go`**
 
@@ -2095,7 +2095,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := newLogger(cfg.Environment)
+	logger := logger.New(cfg.Environment)
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -2170,8 +2170,8 @@ func run() error {
 	return nil
 }
 
-func newLogger(env config.Environment) *slog.Logger {
-	if env == config.EnvironmentProduction {
+func logger.New(env config.Environment) *slog.Logger {
+	if env == config.environment.Production {
 		return slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 	return slog.New(slog.NewTextHandler(os.Stdout, nil))
