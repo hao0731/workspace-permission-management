@@ -8,6 +8,8 @@ This design introduces `function-service`, a backend service that maintains a Mo
 
 Related concept definitions are documented in [../concept.md](../concept.md).
 
+Permission write API extension is documented in [function-resource-permissions.md](./function-resource-permissions.md).
+
 ## Classification and Policies
 
 This is backend and design documentation work.
