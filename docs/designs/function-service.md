@@ -8,6 +8,10 @@ This design introduces `function-service`, a backend service that maintains a Mo
 
 Related concept definitions are documented in [../concept.md](../concept.md).
 
+Related designs:
+
+- [Function Resource Permissions Design](function-resource-permissions.md) extends `function-service` with a `PUT` API for storing one permission configuration per workspace/function pair in `function_resource_permissions`.
+
 ## Classification and Policies
 
 This is backend and design documentation work.
