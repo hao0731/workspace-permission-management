@@ -1,0 +1,137 @@
+@baseUrl = http://localhost:8080
+@workspaceId = workspace-1
+@functionKey = todo
+
+### Save permissions with provided and generated rule IDs
+PUT {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/permissions
+Content-Type: application/json
+
+{
+  "office_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["section_1"],
+      "enabled": true
+    },
+    "extra_rules": [
+      {
+        "rule_id": "rule-office-1",
+        "group_ids": ["group-1"],
+        "action_id": "edit",
+        "resource_tags": ["section_1"],
+        "expiration_date": "2026-06-01T00:00:00Z"
+      },
+      {
+        "group_ids": ["group-2"],
+        "action_id": "delete",
+        "resource_tags": ["section_2"],
+        "expiration_date": "2026-07-01T00:00:00Z"
+      }
+    ]
+  },
+  "remote_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["remote"],
+      "enabled": false
+    },
+    "extra_rules": []
+  }
+}
+
+### Save permissions with duplicate semantic extra rules; response keeps one
+PUT {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/permissions
+Content-Type: application/json
+
+{
+  "office_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["section_1"],
+      "enabled": true
+    },
+    "extra_rules": [
+      {
+        "group_ids": ["group-1", "group-2"],
+        "action_id": "edit",
+        "resource_tags": ["section_1"],
+        "expiration_date": "2026-06-01T00:00:00Z"
+      },
+      {
+        "group_ids": ["group-2", "group-1"],
+        "action_id": "edit",
+        "resource_tags": ["section_1"],
+        "expiration_date": "2026-06-01T00:00:00Z"
+      }
+    ]
+  },
+  "remote_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["remote"],
+      "enabled": false
+    },
+    "extra_rules": []
+  }
+}
+
+### Duplicate rule IDs return 400
+PUT {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/permissions
+Content-Type: application/json
+
+{
+  "office_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["section_1"],
+      "enabled": true
+    },
+    "extra_rules": [
+      {
+        "rule_id": "rule-duplicate",
+        "group_ids": ["group-1"],
+        "action_id": "edit",
+        "resource_tags": ["section_1"],
+        "expiration_date": "2026-06-01T00:00:00Z"
+      }
+    ]
+  },
+  "remote_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["remote"],
+      "enabled": false
+    },
+    "extra_rules": [
+      {
+        "rule_id": "rule-duplicate",
+        "group_ids": ["group-2"],
+        "action_id": "delete",
+        "resource_tags": ["remote"],
+        "expiration_date": "2026-07-01T00:00:00Z"
+      }
+    ]
+  }
+}
+
+### Missing baseline enabled returns 400
+PUT {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/permissions
+Content-Type: application/json
+
+{
+  "office_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["section_1"]
+    },
+    "extra_rules": []
+  },
+  "remote_permission": {
+    "baseline_rule": {
+      "action_id": "view",
+      "resource_tags": ["remote"],
+      "enabled": false
+    },
+    "extra_rules": []
+  }
+}
