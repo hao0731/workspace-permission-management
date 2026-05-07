@@ -62,8 +62,13 @@ func run() error {
 		}
 	}()
 
-	repository := repositories.NewMongoResourceRepository(mongoClient.Database(cfg.MongoDB.Database))
+	db := mongoClient.Database(cfg.MongoDB.Database)
+	repository := repositories.NewMongoResourceRepository(db)
 	if ensureIndexErr := repository.EnsureIndexes(ctx); ensureIndexErr != nil {
+		return ensureIndexErr
+	}
+	permissionRepository := repositories.NewMongoPermissionRepository(db)
+	if ensureIndexErr := permissionRepository.EnsureIndexes(ctx); ensureIndexErr != nil {
 		return ensureIndexErr
 	}
 
@@ -81,6 +86,7 @@ func run() error {
 	resourceService := services.NewResourceService(repository,
 		services.WithResourceDeletedPublisher(newResourceDeletedPublisher(producer, cfg.ResourceDeletedSubject)),
 	)
+	permissionService := services.NewPermissionService(permissionRepository)
 
 	eventHandler := handlers.NewResourceEventHandler(resourceService, cfg.JetStream.Subject, logger)
 	consumer, err := eventbus.NewJetStreamConsumer(ctx, nc, eventbus.Config{
@@ -97,6 +103,7 @@ func run() error {
 	e := echo.New()
 	health.NewHealthManager(processIndicator{}).RegisterRoutes(e)
 	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService, logger))
+	handlers.RegisterPermissionRoutes(e, handlers.NewPermissionHandler(permissionService, logger))
 
 	errCh := make(chan error, 2)
 	go func() {
