@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
@@ -59,22 +57,10 @@ func (h *ResourceHandler) ListResources(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
 	}
-	type nextTokenPayload struct {
-		CreatedAt string `json:"created_at"`
-		ID        string `json:"id"`
-	}
-	payload, err := pagination.DecodeNextToken[nextTokenPayload](token)
+	cursor, err := transport.DecodeNextToken(token)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
 	}
-	if strings.TrimSpace(payload.ID) == "" {
-		return c.JSON(http.StatusBadRequest, validationError("next_token.id is required"))
-	}
-	createdAt, err := time.Parse(time.RFC3339Nano, payload.CreatedAt)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, validationError("next_token.created_at must be RFC3339 timestamp"))
-	}
-	cursor := &resource.Cursor{CreatedAt: createdAt, ID: payload.ID}
 
 	page, err := h.service.ListResources(c.Request().Context(), resource.ListQuery{
 		WorkspaceID: params.workspaceID,
