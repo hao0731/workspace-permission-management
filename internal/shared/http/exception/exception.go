@@ -29,6 +29,13 @@ func WithDetails(details map[string]any) Option {
 	}
 }
 
+
+func WithRequestId(requestID string) Option {
+	return func(ex *Exception) {
+		ex.RequestID = requestID
+	}
+}
+
 func WrapResponse(ex Exception) ErrorResponse {
 	return ErrorResponse{Error: ex}
 }

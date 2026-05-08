@@ -8,7 +8,7 @@ import (
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
-	sharedexception "github.com/hao0731/workspace-permission-management/internal/shared/http/exception"
+	"github.com/hao0731/workspace-permission-management/internal/shared/http/exception"
 	"github.com/labstack/echo/v5"
 )
 
@@ -66,12 +66,12 @@ func (h *ResourceHandler) ListResources(c *echo.Context) error {
 		if errors.Is(err, resource.ErrInvalidInput) {
 			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, sharedexception.WrapResponse(sharedexception.New("internal_error", "Internal server error")))
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 
 	response, err := transport.NewResourceListResponse(page)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, sharedexception.WrapResponse(sharedexception.New("internal_error", "Internal server error")))
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -93,7 +93,7 @@ func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
 			"function_key", params.functionKey,
 			"resource_id", params.resourceID,
 		)
-		return c.JSON(http.StatusInternalServerError, sharedexception.WrapResponse(sharedexception.New("internal_error", "Internal server error")))
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	if status == resource.DeleteStatusNotFound {
 		h.logger.Info("resource delete target already absent",
@@ -106,6 +106,6 @@ func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func validationError(message string) sharedexception.ErrorResponse {
-	return sharedexception.WrapResponse(sharedexception.New("validation_failed", message, sharedexception.WithDetails(map[string]any{})))
+func validationError(message string) exception.ErrorResponse {
+	return exception.WrapResponse(exception.New("validation_failed", message, exception.WithDetails(map[string]any{})))
 }
