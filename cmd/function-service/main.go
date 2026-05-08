@@ -16,6 +16,7 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 	"github.com/hao0731/workspace-permission-management/internal/shared/health"
 	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 	"github.com/nats-io/nats.go"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -102,7 +103,7 @@ func run() error {
 
 	e := echo.New()
 	health.NewHealthManager(processIndicator{}).RegisterRoutes(e)
-	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService, logger))
+	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService, logger, pagination.New()))
 	handlers.RegisterPermissionRoutes(e, handlers.NewPermissionHandler(permissionService, logger))
 
 	errCh := make(chan error, 2)

@@ -1,6 +1,11 @@
 package transport
 
-import "github.com/hao0731/workspace-permission-management/internal/domain/resource"
+import (
+	"time"
+
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
+)
 
 type ResourceListResponse struct {
 	Resources []ResourceResponse `json:"resources"`
@@ -29,9 +34,20 @@ func NewResourceListResponse(page resource.Page) (ResourceListResponse, error) {
 			ResourceTags: append([]string(nil), item.Tags...),
 		})
 	}
-	nextToken, err := EncodeNextToken(page.NextCursor)
-	if err != nil {
-		return ResourceListResponse{}, err
+	nextToken := ""
+	if page.NextCursor != nil {
+		payload := struct {
+			CreatedAt string `json:"created_at"`
+			ID        string `json:"id"`
+		}{
+			CreatedAt: page.NextCursor.CreatedAt.UTC().Format(time.RFC3339Nano),
+			ID:        page.NextCursor.ID,
+		}
+		encoded, err := pagination.EncodeNextToken(payload)
+		if err != nil {
+			return ResourceListResponse{}, err
+		}
+		nextToken = encoded
 	}
 	return ResourceListResponse{
 		Resources: resources,

@@ -5,10 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
 	"github.com/hao0731/workspace-permission-management/internal/shared/http/exception"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 )
 
@@ -18,8 +21,9 @@ type HTTPResourceService interface {
 }
 
 type ResourceHandler struct {
-	service HTTPResourceService
-	logger  *slog.Logger
+	service          HTTPResourceService
+	logger           *slog.Logger
+	paginationHelper *pagination.PaginationHelper
 }
 
 type resourcePathParams struct {
@@ -28,8 +32,8 @@ type resourcePathParams struct {
 	resourceID  string
 }
 
-func NewResourceHandler(service HTTPResourceService, logger *slog.Logger) *ResourceHandler {
-	return &ResourceHandler{service: service, logger: logger}
+func NewResourceHandler(service HTTPResourceService, logger *slog.Logger, paginationHelper *pagination.PaginationHelper) *ResourceHandler {
+	return &ResourceHandler{service: service, logger: logger, paginationHelper: paginationHelper}
 }
 
 func newResourcePathParams(c *echo.Context) resourcePathParams {
@@ -47,14 +51,30 @@ func RegisterRoutes(e *echo.Echo, handler *ResourceHandler) {
 
 func (h *ResourceHandler) ListResources(c *echo.Context) error {
 	params := newResourcePathParams(c)
-	limit, err := transport.ParseLimit(c.QueryParam("limit"))
+	limit, err := h.paginationHelper.ParseLimit(c)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
 	}
-	cursor, err := transport.DecodeNextToken(c.QueryParam("next_token"))
+	token, err := h.paginationHelper.ParseToken(c)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
 	}
+	type nextTokenPayload struct {
+		CreatedAt string `json:"created_at"`
+		ID        string `json:"id"`
+	}
+	payload, err := pagination.DecodeNextToken[nextTokenPayload](token)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	if strings.TrimSpace(payload.ID) == "" {
+		return c.JSON(http.StatusBadRequest, validationError("next_token.id is required"))
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, payload.CreatedAt)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError("next_token.created_at must be RFC3339 timestamp"))
+	}
+	cursor := &resource.Cursor{CreatedAt: createdAt, ID: payload.ID}
 
 	page, err := h.service.ListResources(c.Request().Context(), resource.ListQuery{
 		WorkspaceID: params.workspaceID,
