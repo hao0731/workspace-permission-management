@@ -8,6 +8,7 @@ import (
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/permission"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
+	sharedexception "github.com/hao0731/workspace-permission-management/internal/shared/http/exception"
 	"github.com/labstack/echo/v5"
 )
 
@@ -65,12 +66,7 @@ func (h *PermissionHandler) SavePermissions(c *echo.Context) error {
 			"workspace_id", params.workspaceID,
 			"function_key", params.functionKey,
 		)
-		return c.JSON(http.StatusInternalServerError, transport.ErrorResponse{
-			Error: transport.ErrorBody{
-				Code:    "internal_error",
-				Message: "Internal server error",
-			},
-		})
+		return c.JSON(http.StatusInternalServerError, sharedexception.WrapResponse(sharedexception.New("internal_error", "Internal server error")))
 	}
 
 	return c.JSON(http.StatusOK, transport.NewPermissionSaveResponse(model))

@@ -19,17 +19,6 @@ type PageInfoResponse struct {
 	NextToken   string `json:"next_token"`
 }
 
-type ErrorResponse struct {
-	Error ErrorBody `json:"error"`
-}
-
-type ErrorBody struct {
-	Code      string         `json:"code"`
-	Message   string         `json:"message"`
-	Details   map[string]any `json:"details,omitempty"`
-	RequestID string         `json:"request_id,omitempty"`
-}
-
 func NewResourceListResponse(page resource.Page) (ResourceListResponse, error) {
 	resources := make([]ResourceResponse, 0, len(page.Resources))
 	for _, item := range page.Resources {
