@@ -38,7 +38,7 @@ Policy alignment:
 - Preserve existing validation behavior and error messages.
 - Preserve `errors.Is(err, resource.ErrInvalidInput)` behavior for all invalid input cases.
 - Keep service methods responsible for workflow sequencing, repository calls, publish behavior, and repository/publisher error wrapping.
-- Keep transport-only validation in transport packages.
+- Keep transport-only validation in transport packages, except shared pagination parsing/encode/decode moved to `internal/shared/pagination` per [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md).
 
 ## Non-Goals
 
@@ -78,8 +78,8 @@ Alternatives considered:
 
 Transport packages remain responsible for transport-specific shape and parsing checks:
 
-- HTTP `limit` parsing, defaulting, and maximum limit enforcement.
-- HTTP `next_token` base64url JSON decoding.
+- HTTP `limit` parsing, defaulting, and maximum limit enforcement via shared pagination helper (`internal/shared/pagination`).
+- HTTP `next_token` base64url JSON decoding via shared pagination package (`internal/shared/pagination`).
 - CloudEvent envelope validation and event data mapping.
 - DTO-to-domain mapping.
 

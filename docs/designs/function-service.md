@@ -302,8 +302,9 @@ internal/function-service/transport/
   resource_event.go
   resource_deleted_event.go
   resource_response.go
-  pagination.go
 ```
+
+See shared pagination refactor design: [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md).
 
 Responsibilities:
 
@@ -315,7 +316,7 @@ Responsibilities:
 - `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert query, delete query, and list query.
 - `internal/function-service/services`: resource upsert, list, and delete workflows. Services call domain input/query `Validate` methods before repositories or publishers, define consumer-side repository and publisher interfaces, and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
 - `internal/function-service/handlers`: Echo HTTP handler, route registration, and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.
-- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, HTTP query parsing and transport-only validation helpers, cursor token encode/decode, resource-deleted event DTO construction, and DTO/domain mapping.
+- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, resource-deleted event DTO construction, and DTO/domain mapping. Pagination query parsing and cursor token encode/decode are provided by the shared pagination package (see [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md)).
 
 ## Resource Input Validation Boundary
 
@@ -329,7 +330,7 @@ The domain package owns:
 
 These methods validate framework-independent service workflow invariants such as non-empty resource identity fields, required upsert fields, non-empty resource tags, non-zero event time, positive list limit, and valid cursor fields. They must return errors wrapping `resource.ErrInvalidInput` so HTTP and event handlers can keep their existing error mapping.
 
-Transport packages continue to own transport-specific parsing and validation, including HTTP `limit` parsing and max-limit enforcement, `next_token` decoding, CloudEvent envelope validation, and DTO/domain mapping.
+Transport packages continue to own transport-specific parsing and validation, including CloudEvent envelope validation and DTO/domain mapping. Pagination query parsing and cursor token encode/decode are migrated to the shared helper package as documented in [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md).
 
 Services should call the domain `Validate` methods before invoking repositories or publishers. Services should not keep separate private helper functions that duplicate those domain input/query invariant checks.
 
