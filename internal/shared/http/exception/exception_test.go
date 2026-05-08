@@ -20,7 +20,6 @@ func TestNew_WithDetails(t *testing.T) {
 	}
 }
 
-
 func TestNew_WithRequestId(t *testing.T) {
 	ex := New("validation_failed", "invalid request", WithRequestId("req-123"))
 	if ex.RequestID != "req-123" {
