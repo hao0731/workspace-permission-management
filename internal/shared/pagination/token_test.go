@@ -1,6 +1,7 @@
 package pagination
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -32,5 +33,11 @@ func TestEncodeDecodeNextToken(t *testing.T) {
 func TestDecodeNextTokenInvalid(t *testing.T) {
 	if _, err := DecodeNextToken[tokenPayload]("not-base64"); err == nil {
 		t.Fatal("DecodeNextToken error = nil, want error")
+	}
+}
+
+func TestDecodeNextTokenEmpty(t *testing.T) {
+	if _, err := DecodeNextToken[tokenPayload](""); !errors.Is(err, ErrEmptyToken) {
+		t.Fatalf("DecodeNextToken error = %v, want ErrEmptyToken", err)
 	}
 }

@@ -59,9 +59,5 @@ func (h *PaginationHelper) ParseLimit(c *echo.Context) (int, error) {
 }
 
 func (h *PaginationHelper) ParseToken(c *echo.Context) (string, error) {
-	token := c.QueryParam("next_token")
-	if token == "" {
-		return "", fmt.Errorf("next_token is required")
-	}
-	return token, nil
+	return c.QueryParam("next_token"), nil
 }

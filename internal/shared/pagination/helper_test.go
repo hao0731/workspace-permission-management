@@ -49,12 +49,16 @@ func TestParseLimitWithOptions(t *testing.T) {
 func TestParseToken(t *testing.T) {
 	helper := New()
 	c := newContext(t, "/")
-	if _, err := helper.ParseToken(c); err == nil {
-		t.Fatal("ParseToken error = nil, want error")
+	token, err := helper.ParseToken(c)
+	if err != nil {
+		t.Fatalf("ParseToken error = %v, want nil", err)
+	}
+	if token != "" {
+		t.Fatalf("token = %q, want empty", token)
 	}
 
 	c = newContext(t, "/?next_token=abc")
-	token, err := helper.ParseToken(c)
+	token, err = helper.ParseToken(c)
 	if err != nil {
 		t.Fatalf("ParseToken error = %v, want nil", err)
 	}

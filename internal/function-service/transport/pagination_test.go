@@ -37,3 +37,13 @@ func TestDecodeNextTokenRejectsInvalidToken(t *testing.T) {
 		t.Fatal("DecodeNextToken error = nil, want error")
 	}
 }
+
+func TestDecodeNextTokenEmptyReturnsNilCursor(t *testing.T) {
+	cursor, err := DecodeNextToken("")
+	if err != nil {
+		t.Fatalf("DecodeNextToken error = %v, want nil", err)
+	}
+	if cursor != nil {
+		t.Fatalf("cursor = %+v, want nil", cursor)
+	}
+}

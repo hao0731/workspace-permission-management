@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ func EncodeNextToken(cursor *resource.Cursor) (string, error) {
 func DecodeNextToken(token string) (*resource.Cursor, error) {
 	payload, err := pagination.DecodeNextToken[nextTokenPayload](token)
 	if err != nil {
+		if errors.Is(err, pagination.ErrEmptyToken) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if strings.TrimSpace(payload.ID) == "" {
