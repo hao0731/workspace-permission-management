@@ -8,6 +8,7 @@ import (
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
+	"github.com/hao0731/workspace-permission-management/internal/shared/http/exception"
 	"github.com/labstack/echo/v5"
 )
 
@@ -65,22 +66,12 @@ func (h *ResourceHandler) ListResources(c *echo.Context) error {
 		if errors.Is(err, resource.ErrInvalidInput) {
 			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, transport.ErrorResponse{
-			Error: transport.ErrorBody{
-				Code:    "internal_error",
-				Message: "Internal server error",
-			},
-		})
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 
 	response, err := transport.NewResourceListResponse(page)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, transport.ErrorResponse{
-			Error: transport.ErrorBody{
-				Code:    "internal_error",
-				Message: "Internal server error",
-			},
-		})
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -102,12 +93,7 @@ func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
 			"function_key", params.functionKey,
 			"resource_id", params.resourceID,
 		)
-		return c.JSON(http.StatusInternalServerError, transport.ErrorResponse{
-			Error: transport.ErrorBody{
-				Code:    "internal_error",
-				Message: "Internal server error",
-			},
-		})
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	if status == resource.DeleteStatusNotFound {
 		h.logger.Info("resource delete target already absent",
@@ -120,12 +106,6 @@ func (h *ResourceHandler) DeleteResource(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func validationError(message string) transport.ErrorResponse {
-	return transport.ErrorResponse{
-		Error: transport.ErrorBody{
-			Code:    "validation_failed",
-			Message: message,
-			Details: map[string]any{},
-		},
-	}
+func validationError(message string) exception.ErrorResponse {
+	return exception.WrapResponse(exception.New("validation_failed", message, exception.WithDetails(map[string]any{})))
 }

@@ -537,7 +537,7 @@ Validation errors:
 
 ## Error Handling
 
-HTTP APIs use the backend policy error response shape:
+HTTP APIs use the backend policy error response shape, constructed via `internal/shared/http/exception` (`Exception`, `New`, `WithDetails`, and `WrapResponse`) to keep handler error payload creation consistent across modules:
 
 ```json
 {

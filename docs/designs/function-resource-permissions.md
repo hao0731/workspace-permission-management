@@ -192,7 +192,7 @@ Domain or service validation should reject:
 
 The first implementation should not reject duplicate `group_ids` or `resource_tags` inside one rule. It should normalize them when comparing rules for semantic duplication.
 
-Validation failures return the existing backend policy error shape:
+Validation failures return the existing backend policy error shape, and handlers should construct the payload through `internal/shared/http/exception` to avoid module-local duplication:
 
 ```json
 {
