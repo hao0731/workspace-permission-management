@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 )
 
@@ -46,7 +47,7 @@ func newTestLogger() *slog.Logger {
 
 func TestNewResourceHandlerUsesProvidedLogger(t *testing.T) {
 	logger := newTestLogger()
-	handler := NewResourceHandler(&fakeHTTPResourceService{}, logger)
+	handler := NewResourceHandler(&fakeHTTPResourceService{}, logger, pagination.New())
 
 	if handler.logger != logger {
 		t.Fatal("handler logger did not use provided logger")
@@ -89,10 +90,14 @@ func TestResourceHandlerListResources(t *testing.T) {
 		},
 	}
 	e := echo.New()
-	handler := NewResourceHandler(service, newTestLogger())
+	handler := NewResourceHandler(service, newTestLogger(), pagination.New())
 	RegisterRoutes(e, handler)
 
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/resources", nil)
+	token, _ := pagination.EncodeNextToken(struct {
+		CreatedAt string `json:"created_at"`
+		ID        string `json:"id"`
+	}{CreatedAt: time.Date(2026, 5, 5, 7, 31, 0, 0, time.UTC).Format(time.RFC3339Nano), ID: "resource-1"})
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/resources?next_token="+token, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -113,7 +118,7 @@ func TestResourceHandlerListResources(t *testing.T) {
 
 func TestResourceHandlerRejectsInvalidLimit(t *testing.T) {
 	e := echo.New()
-	handler := NewResourceHandler(&fakeHTTPResourceService{}, newTestLogger())
+	handler := NewResourceHandler(&fakeHTTPResourceService{}, newTestLogger(), pagination.New())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/resources?limit=51", nil)
@@ -128,7 +133,7 @@ func TestResourceHandlerRejectsInvalidLimit(t *testing.T) {
 func TestResourceHandlerDeleteResource(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteStatus: resource.DeleteStatusDeleted}
 	e := echo.New()
-	handler := NewResourceHandler(service, newTestLogger())
+	handler := NewResourceHandler(service, newTestLogger(), pagination.New())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
@@ -149,7 +154,7 @@ func TestResourceHandlerDeleteResource(t *testing.T) {
 func TestResourceHandlerDeleteMissingResourceStillReturnsNoContent(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteStatus: resource.DeleteStatusNotFound}
 	e := echo.New()
-	handler := NewResourceHandler(service, newTestLogger())
+	handler := NewResourceHandler(service, newTestLogger(), pagination.New())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
@@ -164,7 +169,7 @@ func TestResourceHandlerDeleteMissingResourceStillReturnsNoContent(t *testing.T)
 func TestResourceHandlerDeleteValidationError(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteErr: resource.ErrInvalidInput}
 	e := echo.New()
-	handler := NewResourceHandler(service, newTestLogger())
+	handler := NewResourceHandler(service, newTestLogger(), pagination.New())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
@@ -179,7 +184,7 @@ func TestResourceHandlerDeleteValidationError(t *testing.T) {
 func TestResourceHandlerDeleteServiceFailure(t *testing.T) {
 	service := &fakeHTTPResourceService{deleteErr: errors.New("publish failed")}
 	e := echo.New()
-	handler := NewResourceHandler(service, newTestLogger())
+	handler := NewResourceHandler(service, newTestLogger(), pagination.New())
 	RegisterRoutes(e, handler)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/functions/todo/resources/resource-1", nil)
