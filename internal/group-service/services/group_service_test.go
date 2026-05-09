@@ -10,9 +10,21 @@ import (
 )
 
 type fakeGroupRepository struct {
-	input group.Group
-	err   error
-	calls int
+	input           group.Group
+	getQuery        group.GetQuery
+	deleteInput     group.DeleteInput
+	updateInput     group.UpdateGroupingRuleInput
+	listQuery       group.ListIndividualMembersQuery
+	model           *group.Group
+	page            group.IndividualMemberPage
+	err             error
+	calls           int
+	getCalls        int
+	deleteCalls     int
+	updateCalls     int
+	listCalls       int
+	deleteTimestamp time.Time
+	updateTimestamp time.Time
 }
 
 func (f *fakeGroupRepository) Create(ctx context.Context, input group.Group) (group.Group, error) {
@@ -22,6 +34,38 @@ func (f *fakeGroupRepository) Create(ctx context.Context, input group.Group) (gr
 		return group.Group{}, f.err
 	}
 	return input, nil
+}
+
+func (f *fakeGroupRepository) Get(ctx context.Context, query group.GetQuery) (*group.Group, error) {
+	f.getCalls++
+	f.getQuery = query
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.model, nil
+}
+
+func (f *fakeGroupRepository) Delete(ctx context.Context, input group.DeleteInput, deletedAt time.Time) error {
+	f.deleteCalls++
+	f.deleteInput = input
+	f.deleteTimestamp = deletedAt
+	return f.err
+}
+
+func (f *fakeGroupRepository) UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput, updatedAt time.Time) error {
+	f.updateCalls++
+	f.updateInput = input
+	f.updateTimestamp = updatedAt
+	return f.err
+}
+
+func (f *fakeGroupRepository) ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error) {
+	f.listCalls++
+	f.listQuery = query
+	if f.err != nil {
+		return group.IndividualMemberPage{}, f.err
+	}
+	return f.page, nil
 }
 
 func fixedNow() time.Time {
@@ -192,5 +236,103 @@ func TestGroupServiceCreateGroupRepositoryFailure(t *testing.T) {
 	}
 	if errors.Is(err, group.ErrDuplicateName) {
 		t.Fatalf("CreateGroup error = %v, should not be ErrDuplicateName", err)
+	}
+}
+
+func TestGroupServiceGetGroup(t *testing.T) {
+	model := group.Group{ID: "group-1", WorkspaceID: "workspace-1", Name: "Design Reviewers"}
+	repository := &fakeGroupRepository{model: &model}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	got, err := service.GetGroup(context.Background(), group.GetQuery{WorkspaceID: " workspace-1 ", GroupID: " group-1 "})
+	if err != nil {
+		t.Fatalf("GetGroup error = %v, want nil", err)
+	}
+	if got == nil || got.ID != "group-1" {
+		t.Fatalf("group = %+v, want group-1", got)
+	}
+	if repository.getQuery.WorkspaceID != "workspace-1" || repository.getQuery.GroupID != "group-1" {
+		t.Fatalf("query = %+v, want trimmed values", repository.getQuery)
+	}
+}
+
+func TestGroupServiceDeleteGroup(t *testing.T) {
+	repository := &fakeGroupRepository{}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	if err := service.DeleteGroup(context.Background(), group.DeleteInput{WorkspaceID: " workspace-1 ", GroupID: " group-1 "}); err != nil {
+		t.Fatalf("DeleteGroup error = %v, want nil", err)
+	}
+	if repository.deleteCalls != 1 {
+		t.Fatalf("delete calls = %d, want 1", repository.deleteCalls)
+	}
+	if !repository.deleteTimestamp.Equal(fixedNow()) {
+		t.Fatalf("deletedAt = %s, want fixed now", repository.deleteTimestamp)
+	}
+}
+
+func TestGroupServiceUpdateGroupingRule(t *testing.T) {
+	repository := &fakeGroupRepository{}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	err := service.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
+		WorkspaceID:    " workspace-1 ",
+		GroupID:        " group-1 ",
+		ExpirationDate: serviceFutureTime(),
+		Rules: []group.Rule{{
+			AttributeKey: " department ",
+			Operator:     group.OperatorEq,
+			Multi:        false,
+			Value:        "ABCD-123",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateGroupingRule error = %v, want nil", err)
+	}
+	if repository.updateCalls != 1 {
+		t.Fatalf("update calls = %d, want 1", repository.updateCalls)
+	}
+	if repository.updateInput.Rules[0].AttributeKey != "department" {
+		t.Fatalf("rules = %+v, want trimmed department", repository.updateInput.Rules)
+	}
+	if !repository.updateTimestamp.Equal(fixedNow()) {
+		t.Fatalf("updatedAt = %s, want fixed now", repository.updateTimestamp)
+	}
+}
+
+func TestGroupServiceUpdateGroupingRuleNotFound(t *testing.T) {
+	repository := &fakeGroupRepository{err: group.ErrNotFound}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	err := service.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		ExpirationDate: serviceFutureTime(),
+	})
+	if !errors.Is(err, group.ErrNotFound) {
+		t.Fatalf("UpdateGroupingRule error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGroupServiceListIndividualMembers(t *testing.T) {
+	page := group.IndividualMemberPage{
+		Members: []group.IndividualMember{{ID: "member-1", GroupID: "group-1", NTAccount: "user1"}},
+	}
+	repository := &fakeGroupRepository{page: page}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	got, err := service.ListIndividualMembers(context.Background(), group.ListIndividualMembersQuery{
+		WorkspaceID: " workspace-1 ",
+		GroupID:     " group-1 ",
+		Limit:       20,
+	})
+	if err != nil {
+		t.Fatalf("ListIndividualMembers error = %v, want nil", err)
+	}
+	if len(got.Members) != 1 || got.Members[0].NTAccount != "user1" {
+		t.Fatalf("members = %+v, want user1", got.Members)
+	}
+	if repository.listQuery.WorkspaceID != "workspace-1" || repository.listQuery.GroupID != "group-1" {
+		t.Fatalf("query = %+v, want trimmed identity", repository.listQuery)
 	}
 }
