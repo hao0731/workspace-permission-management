@@ -161,11 +161,17 @@ func (r *MongoGroupRepository) UpdateGroupingRule(ctx context.Context, input gro
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
-		count, countErr := r.groups.CountDocuments(sessionCtx, activeGroupFilter(group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID}))
-		if countErr != nil {
-			return nil, fmt.Errorf("count active group: %w", countErr)
+		result, updateErr := r.groups.UpdateOne(sessionCtx,
+			activeGroupFilter(group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID}),
+			bson.M{"$set": bson.M{
+				"grouping_rule": newGroupingRuleDocument(group.GroupingRule{Rules: input.Rules, ExpirationDate: input.ExpirationDate}),
+				"updated_at":    updatedAt,
+			}},
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("update grouping rule: %w", updateErr)
 		}
-		if count == 0 {
+		if result.MatchedCount == 0 {
 			return nil, group.ErrNotFound
 		}
 		if len(input.Rules) == 0 {
@@ -176,16 +182,6 @@ func (r *MongoGroupRepository) UpdateGroupingRule(ctx context.Context, input gro
 			if memberCount == 0 {
 				return nil, fmt.Errorf("%w: at least one membership source is required", group.ErrInvalidInput)
 			}
-		}
-		_, updateErr := r.groups.UpdateOne(sessionCtx,
-			activeGroupFilter(group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID}),
-			bson.M{"$set": bson.M{
-				"grouping_rule": newGroupingRuleDocument(group.GroupingRule{Rules: input.Rules, ExpirationDate: input.ExpirationDate}),
-				"updated_at":    updatedAt,
-			}},
-		)
-		if updateErr != nil {
-			return nil, fmt.Errorf("update grouping rule: %w", updateErr)
 		}
 		return nil, nil
 	})

@@ -11,8 +11,11 @@ import (
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/event"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/drivertest"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/xoptions"
 )
 
 func repositoryTime() time.Time {
@@ -137,6 +140,56 @@ func TestBuildIndividualMemberListFilter(t *testing.T) {
 	}
 }
 
+func TestMongoGroupRepositoryUpdateGroupingRuleUsesUpdateResultForExistence(t *testing.T) {
+	var commands []string
+	monitor := &event.CommandMonitor{
+		Started: func(_ context.Context, evt *event.CommandStartedEvent) {
+			commands = append(commands, evt.CommandName)
+		},
+	}
+	deployment := drivertest.NewMockDeployment(
+		mockMatchedUpdateResponse(),
+		mockMatchedUpdateResponse(),
+		bson.D{{Key: "ok", Value: 1}},
+	)
+	clientOptions := options.Client().SetMonitor(monitor)
+	if err := xoptions.SetInternalClientOptions(clientOptions, "deployment", deployment); err != nil {
+		t.Fatalf("set mock deployment: %v", err)
+	}
+	client, err := mongo.Connect(clientOptions)
+	if err != nil {
+		t.Fatalf("connect mock mongodb: %v", err)
+	}
+	t.Cleanup(func() {
+		if disconnectErr := client.Disconnect(context.Background()); disconnectErr != nil {
+			t.Fatalf("disconnect mock mongodb: %v", disconnectErr)
+		}
+	})
+	repository := NewMongoGroupRepository(client, client.Database("test"))
+
+	err = repository.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		ExpirationDate: repositoryTime().Add(48 * time.Hour),
+		Rules: []group.Rule{{
+			AttributeKey: "department",
+			Operator:     group.OperatorEq,
+			Multi:        false,
+			Value:        "ABCD-123",
+		}},
+	}, repositoryTime().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("UpdateGroupingRule error = %v, want nil", err)
+	}
+
+	if !containsCommand(commands, "update") {
+		t.Fatalf("commands = %v, want update command", commands)
+	}
+	if containsCommand(commands, "aggregate") || containsCommand(commands, "count") {
+		t.Fatalf("commands = %v, want existence determined by update matched count without count command", commands)
+	}
+}
+
 func TestIndividualMemberPaginationIndex(t *testing.T) {
 	memberIndexes := individualMemberIndexModels()
 	if len(memberIndexes) != 2 {
@@ -158,6 +211,28 @@ func indexOptions(t *testing.T, model mongo.IndexModel) options.IndexOptions {
 		}
 	}
 	return out
+}
+
+func mockMatchedUpdateResponse() bson.D {
+	return bson.D{
+		{Key: "ok", Value: 1},
+		{Key: "n", Value: 1},
+		{Key: "nModified", Value: 1},
+		{Key: "cursor", Value: bson.D{
+			{Key: "id", Value: int64(0)},
+			{Key: "ns", Value: "test.groups"},
+			{Key: "firstBatch", Value: bson.A{bson.D{{Key: "n", Value: 1}}}},
+		}},
+	}
+}
+
+func containsCommand(commands []string, name string) bool {
+	for _, command := range commands {
+		if command == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestIsDuplicateIndex(t *testing.T) {
