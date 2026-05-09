@@ -86,12 +86,9 @@ func (r *MongoGroupRepository) Create(ctx context.Context, input group.Group) (g
 	}
 	defer session.EndSession(ctx)
 
-	if err := mongo.WithSession(ctx, session, func(sessionCtx context.Context) error {
-		if err := session.StartTransaction(); err != nil {
-			return fmt.Errorf("start group create transaction: %w", err)
-		}
+	if _, err := session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
 		if _, err := r.groups.InsertOne(sessionCtx, newGroupDocument(input)); err != nil {
-			return r.abortTransaction(sessionCtx, session, mapGroupInsertError(err))
+			return nil, mapGroupInsertError(err)
 		}
 		memberDocs := newIndividualMemberDocuments(input)
 		if len(memberDocs) > 0 {
@@ -100,24 +97,14 @@ func (r *MongoGroupRepository) Create(ctx context.Context, input group.Group) (g
 				docs = append(docs, doc)
 			}
 			if _, err := r.members.InsertMany(sessionCtx, docs); err != nil {
-				return r.abortTransaction(sessionCtx, session, fmt.Errorf("insert group individual members: %w", err))
+				return nil, fmt.Errorf("insert group individual members: %w", err)
 			}
 		}
-		if err := session.CommitTransaction(sessionCtx); err != nil {
-			return fmt.Errorf("commit group create transaction: %w", err)
-		}
-		return nil
+		return nil, nil
 	}); err != nil {
 		return group.Group{}, err
 	}
 	return input, nil
-}
-
-func (r *MongoGroupRepository) abortTransaction(ctx context.Context, session *mongo.Session, cause error) error {
-	if err := session.AbortTransaction(ctx); err != nil {
-		return fmt.Errorf("%w; abort group create transaction: %w", cause, err)
-	}
-	return cause
 }
 
 func groupIndexModels() []mongo.IndexModel {

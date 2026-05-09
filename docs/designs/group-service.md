@@ -392,18 +392,18 @@ The service should expose a create workflow equivalent to:
 3. Generate `group_id`, individual member IDs, and one `now` timestamp.
 4. Build the domain `Group` model and member models.
 5. Call the repository create method.
-6. Repository starts a MongoDB session and transaction.
+6. Repository starts a MongoDB session and executes the write callback through `session.WithTransaction`.
 7. Repository inserts the `groups` document.
 8. Repository inserts all `group_individual_members` documents when the request includes individual members.
-9. Repository commits the transaction.
+9. MongoDB driver commits the transaction and retries transient transaction errors according to `WithTransaction` behavior.
 10. Service returns the created domain `Group`.
 11. Handler renders `201 Created`.
 
 Failure behavior:
 
-- If any insert fails, the transaction aborts and neither collection should contain partial create data.
+- If any insert fails, the transaction is aborted by the driver and neither collection should contain partial create data.
 - If the `groups` partial unique index rejects the name, repository maps the duplicate key to a service/domain duplicate-name error.
-- If the transaction commit fails, handler returns `500` unless the failure is mapped to a known conflict.
+- If transaction execution or commit fails after driver retry handling, handler returns `500` unless the failure is mapped to a known conflict.
 
 MongoDB transactions require MongoDB to run as a replica set. The existing local `docker-compose.yml` already starts MongoDB with `--replSet rs0`, so the design aligns with local development infrastructure.
 
