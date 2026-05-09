@@ -179,7 +179,9 @@ Field contract:
 - `name` is trimmed before validation, persistence, uniqueness checks, and response rendering.
 - `description` is persisted as provided. Empty descriptions are allowed.
 - `grouping_rule.rules` are interpreted as an `AND` relationship.
+- `grouping_rule.rules` is limited by `GROUP_SERVICE_MAX_GROUPING_RULES`, defaulting to 10 items.
 - `grouping_rule.expiration_date` and `individual_members[].expiration_date` are accepted as RFC3339 timestamp strings and stored as MongoDB Date values.
+- `individual_members` is limited by `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS`, defaulting to 1000 items.
 - Responses return timestamp fields as RFC3339 strings through Go's JSON encoding for `time.Time`.
 - `created_at`, `updated_at`, `deleted_at`, and `normalized_name` are persistence metadata and are not included in the public response contract.
 
@@ -239,12 +241,14 @@ Domain or service validation should reject:
 - Missing `grouping_rule.expiration_date`.
 - `grouping_rule.expiration_date` that is not later than the service's request processing time.
 - Requests where both `grouping_rule.rules` and `individual_members` are empty.
+- Requests where `grouping_rule.rules` exceeds the configured `GROUP_SERVICE_MAX_GROUPING_RULES` limit. The initial default limit is 10.
 - Invalid rule attributes, operators, or values.
+- Requests where `individual_members` exceeds the configured `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS` limit. The initial default limit is 1000.
 - Empty or whitespace-only `individual_members[].nt_account` after trimming.
 - Duplicate `individual_members[].nt_account` values in one request after trimming.
 - `individual_members[].expiration_date` values that are not later than the service's request processing time.
 
-The implementation should inject the clock at the service boundary so expiration-date validation is deterministic in tests.
+The implementation should inject the clock and validation limits at the service boundary so expiration-date and maximum-count validation are deterministic in tests. Limit values come from service configuration, but validation itself remains in the domain layer so non-HTTP callers cannot bypass the same invariants.
 
 ## Error Handling
 
@@ -263,7 +267,7 @@ New HTTP APIs should use the shared backend error response shape:
 
 Status mapping:
 
-- `400 Bad Request`: malformed JSON, invalid request shape, invalid field values, duplicate request `nt_account` values, or expiration dates that are not in the future.
+- `400 Bad Request`: malformed JSON, invalid request shape, invalid field values, duplicate request `nt_account` values, configured limit violations, or expiration dates that are not in the future.
 - `409 Conflict`: active group name already exists in the same workspace.
 - `500 Internal Server Error`: unexpected repository, transaction, or infrastructure failure.
 
@@ -280,6 +284,7 @@ Primary types:
 - `GroupingRule`: `rules` plus expiration date.
 - `Rule`: employee attribute predicate.
 - `IndividualMember`: explicit user membership with expiration date.
+- `ValidationLimits`: maximum allowed `grouping_rule.rules` and `individual_members` counts supplied by the service configuration.
 
 The domain should expose stable errors such as:
 
@@ -383,7 +388,7 @@ Rationale:
 The service should expose a create workflow equivalent to:
 
 1. Receive `CreateInput` from the handler through transport mapping.
-2. Validate domain invariants.
+2. Validate domain invariants, including configured `grouping_rule.rules` and `individual_members` count limits.
 3. Generate `group_id`, individual member IDs, and one `now` timestamp.
 4. Build the domain `Group` model and member models.
 5. Call the repository create method.
@@ -416,12 +421,16 @@ Optional configuration with defaults:
 
 - `GROUP_SERVICE_ENV`: default `development`
 - `GROUP_SERVICE_SHUTDOWN_TIMEOUT`: default `10s`
+- `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS`: default `1000`
+- `GROUP_SERVICE_MAX_GROUPING_RULES`: default `10`
 
 Validation rules:
 
 - Environment must be a known value from `internal/shared/environment`.
 - Required string values must be non-empty after trimming.
 - Shutdown timeout must be positive.
+- `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS` must be positive.
+- `GROUP_SERVICE_MAX_GROUPING_RULES` must be positive.
 - Missing `.env` files must not fail startup.
 
 ## Health and Shutdown
@@ -467,6 +476,8 @@ Domain tests:
 - Trimmed group name is required.
 - At least one membership source is required.
 - Grouping-rule expiration must be in the future.
+- `grouping_rule.rules` exceeding the configured limit is rejected.
+- `individual_members` exceeding the configured limit is rejected.
 - Individual member expiration must be in the future.
 - Rule operator validation rejects unsupported operators.
 - `multi: false` rejects `null` and array values.
@@ -507,6 +518,8 @@ Config and main tests:
 
 - Missing required `GROUP_SERVICE_*` values fail validation.
 - Defaults are applied for optional config values.
+- Validation limit environment overrides are loaded.
+- Non-positive validation limits fail configuration validation.
 - Health route registration includes `/health/liveness`.
 
 Verification commands for implementation:

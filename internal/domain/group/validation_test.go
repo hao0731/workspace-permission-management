@@ -36,6 +36,15 @@ func validCreateInput() CreateInput {
 	}
 }
 
+func validRule(attributeKey string) Rule {
+	return Rule{
+		AttributeKey: attributeKey,
+		Operator:     OperatorEq,
+		Multi:        false,
+		Value:        "ABCD-123",
+	}
+}
+
 func requireInvalidInput(t *testing.T, err error, wantMessage string) {
 	t.Helper()
 	if !errors.Is(err, ErrInvalidInput) {
@@ -43,6 +52,54 @@ func requireInvalidInput(t *testing.T, err error, wantMessage string) {
 	}
 	if !strings.Contains(err.Error(), wantMessage) {
 		t.Fatalf("error = %q, want message containing %q", err.Error(), wantMessage)
+	}
+}
+
+func TestCreateInputValidateWithLimitsRejectsLimitExceeded(t *testing.T) {
+	tests := []struct {
+		name        string
+		limits      ValidationLimits
+		mutate      func(*CreateInput)
+		wantMessage string
+	}{
+		{
+			name: "too many grouping rules",
+			limits: ValidationLimits{
+				MaxGroupingRules:     1,
+				MaxIndividualMembers: 1000,
+			},
+			mutate: func(input *CreateInput) {
+				input.GroupingRule.Rules = []Rule{
+					validRule("department"),
+					validRule("job_code"),
+				}
+			},
+			wantMessage: "grouping rules must not exceed 1 items",
+		},
+		{
+			name: "too many individual members",
+			limits: ValidationLimits{
+				MaxGroupingRules:     10,
+				MaxIndividualMembers: 1,
+			},
+			mutate: func(input *CreateInput) {
+				input.IndividualMembers = []IndividualMember{
+					{NTAccount: "user1", ExpirationDate: futureTime()},
+					{NTAccount: "user2", ExpirationDate: futureTime()},
+				}
+			},
+			wantMessage: "individual members must not exceed 1 items",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := validCreateInput().Normalize()
+			tt.mutate(&input)
+
+			err := input.ValidateWithLimits(validationNow(), tt.limits)
+			requireInvalidInput(t, err, tt.wantMessage)
+		})
 	}
 }
 

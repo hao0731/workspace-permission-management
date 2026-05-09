@@ -16,6 +16,11 @@ const (
 	OperatorLte   Operator = "lte"
 )
 
+const (
+	DefaultMaxIndividualMembers = 1000
+	DefaultMaxGroupingRules     = 10
+)
+
 type Group struct {
 	ID                string
 	WorkspaceID       string
@@ -57,6 +62,28 @@ type IndividualMember struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      *time.Time
+}
+
+type ValidationLimits struct {
+	MaxIndividualMembers int
+	MaxGroupingRules     int
+}
+
+func DefaultValidationLimits() ValidationLimits {
+	return ValidationLimits{
+		MaxIndividualMembers: DefaultMaxIndividualMembers,
+		MaxGroupingRules:     DefaultMaxGroupingRules,
+	}
+}
+
+func (limits ValidationLimits) WithDefaults() ValidationLimits {
+	if limits.MaxIndividualMembers <= 0 {
+		limits.MaxIndividualMembers = DefaultMaxIndividualMembers
+	}
+	if limits.MaxGroupingRules <= 0 {
+		limits.MaxGroupingRules = DefaultMaxGroupingRules
+	}
+	return limits
 }
 
 func (input CreateInput) Normalize() CreateInput {

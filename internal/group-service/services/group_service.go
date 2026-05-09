@@ -33,10 +33,17 @@ func WithGroupClock(clock func() time.Time) GroupOption {
 	}
 }
 
+func WithGroupValidationLimits(limits group.ValidationLimits) GroupOption {
+	return func(s *GroupService) {
+		s.validationLimits = limits.WithDefaults()
+	}
+}
+
 type GroupService struct {
-	repository  GroupRepository
-	idGenerator func() string
-	now         func() time.Time
+	repository       GroupRepository
+	idGenerator      func() string
+	now              func() time.Time
+	validationLimits group.ValidationLimits
 }
 
 func NewGroupService(repository GroupRepository, opts ...GroupOption) *GroupService {
@@ -46,6 +53,7 @@ func NewGroupService(repository GroupRepository, opts ...GroupOption) *GroupServ
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+		validationLimits: group.DefaultValidationLimits(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -58,7 +66,7 @@ func NewGroupService(repository GroupRepository, opts ...GroupOption) *GroupServ
 func (s *GroupService) CreateGroup(ctx context.Context, input group.CreateInput) (group.Group, error) {
 	now := s.now().UTC()
 	input = input.Normalize()
-	if err := input.Validate(now); err != nil {
+	if err := input.ValidateWithLimits(now, s.validationLimits); err != nil {
 		return group.Group{}, err
 	}
 

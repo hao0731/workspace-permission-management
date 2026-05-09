@@ -13,6 +13,8 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	t.Setenv("GROUP_SERVICE_MONGODB_URI", "mongodb://example:27017")
 	t.Setenv("GROUP_SERVICE_MONGODB_DATABASE", "wpm")
 	t.Setenv("GROUP_SERVICE_SHUTDOWN_TIMEOUT", "15s")
+	t.Setenv("GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS", "250")
+	t.Setenv("GROUP_SERVICE_MAX_GROUPING_RULES", "5")
 
 	cfg, err := Load()
 	if err != nil {
@@ -33,6 +35,12 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	if cfg.ShutdownTimeout != 15*time.Second {
 		t.Fatalf("ShutdownTimeout = %s, want 15s", cfg.ShutdownTimeout)
 	}
+	if cfg.Validation.MaxIndividualMembers != 250 {
+		t.Fatalf("MaxIndividualMembers = %d, want 250", cfg.Validation.MaxIndividualMembers)
+	}
+	if cfg.Validation.MaxGroupingRules != 5 {
+		t.Fatalf("MaxGroupingRules = %d, want 5", cfg.Validation.MaxGroupingRules)
+	}
 }
 
 func TestLoadAppliesOptionalDefaults(t *testing.T) {
@@ -49,6 +57,12 @@ func TestLoadAppliesOptionalDefaults(t *testing.T) {
 	}
 	if cfg.ShutdownTimeout != 10*time.Second {
 		t.Fatalf("ShutdownTimeout = %s, want 10s", cfg.ShutdownTimeout)
+	}
+	if cfg.Validation.MaxIndividualMembers != 1000 {
+		t.Fatalf("MaxIndividualMembers = %d, want 1000", cfg.Validation.MaxIndividualMembers)
+	}
+	if cfg.Validation.MaxGroupingRules != 10 {
+		t.Fatalf("MaxGroupingRules = %d, want 10", cfg.Validation.MaxGroupingRules)
 	}
 }
 
@@ -80,5 +94,34 @@ func TestLoadRejectsInvalidShutdownTimeout(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load error = nil, want error")
+	}
+}
+
+func TestLoadRejectsInvalidValidationLimits(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{
+			name: "max individual members",
+			key:  "GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS",
+		},
+		{
+			name: "max grouping rules",
+			key:  "GROUP_SERVICE_MAX_GROUPING_RULES",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GROUP_SERVICE_HTTP_ADDR", ":8081")
+			t.Setenv("GROUP_SERVICE_MONGODB_URI", "mongodb://localhost:27017")
+			t.Setenv("GROUP_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
+			t.Setenv(tt.key, "0")
+
+			if _, err := Load(); err == nil {
+				t.Fatal("Load error = nil, want error")
+			}
+		})
 	}
 }

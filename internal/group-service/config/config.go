@@ -14,12 +14,18 @@ type Config struct {
 	Environment     environment.Environment
 	HTTPAddr        string
 	MongoDB         MongoDBConfig
+	Validation      ValidationConfig
 	ShutdownTimeout time.Duration
 }
 
 type MongoDBConfig struct {
 	URI      string
 	Database string
+}
+
+type ValidationConfig struct {
+	MaxIndividualMembers int
+	MaxGroupingRules     int
 }
 
 func Load() (Config, error) {
@@ -31,6 +37,8 @@ func Load() (Config, error) {
 
 	v.SetDefault("GROUP_SERVICE_ENV", string(environment.Development))
 	v.SetDefault("GROUP_SERVICE_SHUTDOWN_TIMEOUT", "10s")
+	v.SetDefault("GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS", 1000)
+	v.SetDefault("GROUP_SERVICE_MAX_GROUPING_RULES", 10)
 
 	cfg := Config{
 		Environment: environment.Environment(v.GetString("GROUP_SERVICE_ENV")),
@@ -38,6 +46,10 @@ func Load() (Config, error) {
 		MongoDB: MongoDBConfig{
 			URI:      v.GetString("GROUP_SERVICE_MONGODB_URI"),
 			Database: v.GetString("GROUP_SERVICE_MONGODB_DATABASE"),
+		},
+		Validation: ValidationConfig{
+			MaxIndividualMembers: v.GetInt("GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS"),
+			MaxGroupingRules:     v.GetInt("GROUP_SERVICE_MAX_GROUPING_RULES"),
 		},
 		ShutdownTimeout: v.GetDuration("GROUP_SERVICE_SHUTDOWN_TIMEOUT"),
 	}
@@ -63,6 +75,12 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownTimeout <= 0 {
 		return fmt.Errorf("GROUP_SERVICE_SHUTDOWN_TIMEOUT must be positive")
+	}
+	if c.Validation.MaxIndividualMembers <= 0 {
+		return fmt.Errorf("GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS must be positive")
+	}
+	if c.Validation.MaxGroupingRules <= 0 {
+		return fmt.Errorf("GROUP_SERVICE_MAX_GROUPING_RULES must be positive")
 	}
 	return nil
 }

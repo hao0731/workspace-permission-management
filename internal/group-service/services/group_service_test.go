@@ -110,6 +110,71 @@ func TestGroupServiceCreateGroupValidationFailureDoesNotCallRepository(t *testin
 	}
 }
 
+func TestGroupServiceCreateGroupConfiguredLimitFailureDoesNotCallRepository(t *testing.T) {
+	tests := []struct {
+		name   string
+		limits group.ValidationLimits
+		mutate func(*group.CreateInput)
+	}{
+		{
+			name: "too many grouping rules",
+			limits: group.ValidationLimits{
+				MaxGroupingRules:     1,
+				MaxIndividualMembers: 1000,
+			},
+			mutate: func(input *group.CreateInput) {
+				input.GroupingRule.Rules = []group.Rule{
+					{
+						AttributeKey: "department",
+						Operator:     group.OperatorEq,
+						Multi:        false,
+						Value:        "ABCD-123",
+					},
+					{
+						AttributeKey: "job_code",
+						Operator:     group.OperatorEq,
+						Multi:        false,
+						Value:        "EFGH-456",
+					},
+				}
+			},
+		},
+		{
+			name: "too many individual members",
+			limits: group.ValidationLimits{
+				MaxGroupingRules:     10,
+				MaxIndividualMembers: 1,
+			},
+			mutate: func(input *group.CreateInput) {
+				input.IndividualMembers = []group.IndividualMember{
+					{NTAccount: "user1", ExpirationDate: serviceFutureTime()},
+					{NTAccount: "user2", ExpirationDate: serviceFutureTime()},
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := &fakeGroupRepository{}
+			service := NewGroupService(repository,
+				WithGroupClock(fixedNow),
+				WithGroupValidationLimits(tt.limits),
+			)
+			input := validServiceCreateInput()
+			tt.mutate(&input)
+
+			_, err := service.CreateGroup(context.Background(), input)
+			if !errors.Is(err, group.ErrInvalidInput) {
+				t.Fatalf("CreateGroup error = %v, want ErrInvalidInput", err)
+			}
+			if repository.calls != 0 {
+				t.Fatalf("repository calls = %d, want 0", repository.calls)
+			}
+		})
+	}
+}
+
 func TestGroupServiceCreateGroupDuplicateName(t *testing.T) {
 	repository := &fakeGroupRepository{err: group.ErrDuplicateName}
 	service := NewGroupService(repository, WithGroupClock(fixedNow))
