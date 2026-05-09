@@ -111,6 +111,3 @@ Content-Type: application/json
   },
   "individual_members": []
 }
-
-### Liveness probe
-GET {{baseUrl}}/health/liveness
