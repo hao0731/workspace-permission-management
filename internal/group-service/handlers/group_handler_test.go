@@ -11,14 +11,25 @@ import (
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 )
 
 type fakeHTTPGroupService struct {
-	input group.CreateInput
-	model group.Group
-	err   error
-	calls int
+	input       group.CreateInput
+	getQuery    group.GetQuery
+	deleteInput group.DeleteInput
+	updateInput group.UpdateGroupingRuleInput
+	listQuery   group.ListIndividualMembersQuery
+	model       group.Group
+	groupPtr    *group.Group
+	page        group.IndividualMemberPage
+	err         error
+	calls       int
+	getCalls    int
+	deleteCalls int
+	updateCalls int
+	listCalls   int
 }
 
 func (f *fakeHTTPGroupService) CreateGroup(ctx context.Context, input group.CreateInput) (group.Group, error) {
@@ -28,6 +39,36 @@ func (f *fakeHTTPGroupService) CreateGroup(ctx context.Context, input group.Crea
 		return group.Group{}, f.err
 	}
 	return f.model, nil
+}
+
+func (f *fakeHTTPGroupService) GetGroup(ctx context.Context, query group.GetQuery) (*group.Group, error) {
+	f.getCalls++
+	f.getQuery = query
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.groupPtr, nil
+}
+
+func (f *fakeHTTPGroupService) DeleteGroup(ctx context.Context, input group.DeleteInput) error {
+	f.deleteCalls++
+	f.deleteInput = input
+	return f.err
+}
+
+func (f *fakeHTTPGroupService) UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput) error {
+	f.updateCalls++
+	f.updateInput = input
+	return f.err
+}
+
+func (f *fakeHTTPGroupService) ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error) {
+	f.listCalls++
+	f.listQuery = query
+	if f.err != nil {
+		return group.IndividualMemberPage{}, f.err
+	}
+	return f.page, nil
 }
 
 func validGroupRequestBody() string {
@@ -83,7 +124,7 @@ func groupModel() group.Group {
 func TestGroupHandlerCreateGroup(t *testing.T) {
 	service := &fakeHTTPGroupService{model: groupModel()}
 	e := echo.New()
-	RegisterRoutes(e, NewGroupHandler(service, newTestLogger()))
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups", strings.NewReader(validGroupRequestBody()))
 	req.Header.Set("Content-Type", "application/json")
@@ -111,7 +152,7 @@ func TestGroupHandlerCreateGroup(t *testing.T) {
 func TestGroupHandlerRejectsMalformedJSON(t *testing.T) {
 	service := &fakeHTTPGroupService{}
 	e := echo.New()
-	RegisterRoutes(e, NewGroupHandler(service, newTestLogger()))
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups", strings.NewReader(`{"name":`))
 	req.Header.Set("Content-Type", "application/json")
@@ -129,7 +170,7 @@ func TestGroupHandlerRejectsMalformedJSON(t *testing.T) {
 func TestGroupHandlerValidationError(t *testing.T) {
 	service := &fakeHTTPGroupService{err: group.ErrInvalidInput}
 	e := echo.New()
-	RegisterRoutes(e, NewGroupHandler(service, newTestLogger()))
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups", strings.NewReader(validGroupRequestBody()))
 	req.Header.Set("Content-Type", "application/json")
@@ -144,7 +185,7 @@ func TestGroupHandlerValidationError(t *testing.T) {
 func TestGroupHandlerDuplicateName(t *testing.T) {
 	service := &fakeHTTPGroupService{err: group.ErrDuplicateName}
 	e := echo.New()
-	RegisterRoutes(e, NewGroupHandler(service, newTestLogger()))
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups", strings.NewReader(validGroupRequestBody()))
 	req.Header.Set("Content-Type", "application/json")
@@ -159,7 +200,7 @@ func TestGroupHandlerDuplicateName(t *testing.T) {
 func TestGroupHandlerServiceFailure(t *testing.T) {
 	service := &fakeHTTPGroupService{err: errors.New("database unavailable")}
 	e := echo.New()
-	RegisterRoutes(e, NewGroupHandler(service, newTestLogger()))
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups", strings.NewReader(validGroupRequestBody()))
 	req.Header.Set("Content-Type", "application/json")
@@ -168,5 +209,126 @@ func TestGroupHandlerServiceFailure(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestGroupHandlerGetGroup(t *testing.T) {
+	model := groupModel()
+	service := &fakeHTTPGroupService{groupPtr: &model}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/groups/group-1", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if service.getQuery.WorkspaceID != "workspace-1" || service.getQuery.GroupID != "group-1" {
+		t.Fatalf("query = %+v, want path params", service.getQuery)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["group"] == nil {
+		t.Fatal("group = nil, want object")
+	}
+}
+
+func TestGroupHandlerGetGroupMissing(t *testing.T) {
+	service := &fakeHTTPGroupService{}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/groups/missing", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"group":null`) {
+		t.Fatalf("body = %s, want group null", rec.Body.String())
+	}
+}
+
+func TestGroupHandlerDeleteGroup(t *testing.T) {
+	service := &fakeHTTPGroupService{}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/groups/group-1", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if service.deleteInput.GroupID != "group-1" {
+		t.Fatalf("delete input = %+v, want group-1", service.deleteInput)
+	}
+}
+
+func TestGroupHandlerUpdateGroupingRule(t *testing.T) {
+	service := &fakeHTTPGroupService{}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/workspaces/workspace-1/groups/group-1/grouping-rules", strings.NewReader(`{
+		"rules": [{"attribute_key": "department", "operator": "eq", "multi": false, "value": "ABCD-123"}],
+		"expiration_date": "2026-06-01T00:00:00Z"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if service.updateInput.GroupID != "group-1" || len(service.updateInput.Rules) != 1 {
+		t.Fatalf("update input = %+v, want group-1 and one rule", service.updateInput)
+	}
+}
+
+func TestGroupHandlerUpdateGroupingRuleMissingGroup(t *testing.T) {
+	service := &fakeHTTPGroupService{err: group.ErrNotFound}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/workspaces/workspace-1/groups/missing/grouping-rules", strings.NewReader(`{
+		"rules": [],
+		"expiration_date": "2026-06-01T00:00:00Z"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestGroupHandlerListIndividualMembers(t *testing.T) {
+	expiration := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	service := &fakeHTTPGroupService{page: group.IndividualMemberPage{
+		Members: []group.IndividualMember{{ID: "member-1", GroupID: "group-1", NTAccount: "user1", ExpirationDate: expiration}},
+	}}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/groups/group-1/individual-members?limit=20", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if service.listQuery.Limit != 20 || service.listQuery.GroupID != "group-1" {
+		t.Fatalf("list query = %+v, want limit 20 and group-1", service.listQuery)
+	}
+	if !strings.Contains(rec.Body.String(), `"members"`) {
+		t.Fatalf("body = %s, want members", rec.Body.String())
 	}
 }

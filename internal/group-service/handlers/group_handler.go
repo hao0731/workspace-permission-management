@@ -9,32 +9,43 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
 	"github.com/hao0731/workspace-permission-management/internal/group-service/transport"
 	"github.com/hao0731/workspace-permission-management/internal/shared/http/exception"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 )
 
 type HTTPGroupService interface {
 	CreateGroup(ctx context.Context, input group.CreateInput) (group.Group, error)
+	GetGroup(ctx context.Context, query group.GetQuery) (*group.Group, error)
+	DeleteGroup(ctx context.Context, input group.DeleteInput) error
+	UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput) error
+	ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error)
 }
 
 type GroupHandler struct {
-	service HTTPGroupService
-	logger  *slog.Logger
+	service          HTTPGroupService
+	logger           *slog.Logger
+	paginationHelper *pagination.PaginationHelper
 }
 
 type groupPathParams struct {
 	workspaceID string
+	groupID     string
 }
 
-func NewGroupHandler(service HTTPGroupService, logger *slog.Logger) *GroupHandler {
-	return &GroupHandler{service: service, logger: logger}
+func NewGroupHandler(service HTTPGroupService, logger *slog.Logger, paginationHelper *pagination.PaginationHelper) *GroupHandler {
+	return &GroupHandler{service: service, logger: logger, paginationHelper: paginationHelper}
 }
 
 func RegisterRoutes(e *echo.Echo, handler *GroupHandler) {
 	e.POST("/api/v1/workspaces/:workspace_id/groups", handler.CreateGroup)
+	e.GET("/api/v1/workspaces/:workspace_id/groups/:group_id", handler.GetGroup)
+	e.DELETE("/api/v1/workspaces/:workspace_id/groups/:group_id", handler.DeleteGroup)
+	e.PUT("/api/v1/workspaces/:workspace_id/groups/:group_id/grouping-rules", handler.UpdateGroupingRule)
+	e.GET("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members", handler.ListIndividualMembers)
 }
 
 func newGroupPathParams(c *echo.Context) groupPathParams {
-	return groupPathParams{workspaceID: c.Param("workspace_id")}
+	return groupPathParams{workspaceID: c.Param("workspace_id"), groupID: c.Param("group_id")}
 }
 
 func (h *GroupHandler) CreateGroup(c *echo.Context) error {
@@ -63,6 +74,98 @@ func (h *GroupHandler) CreateGroup(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	return c.JSON(http.StatusCreated, transport.NewGroupCreateResponse(model))
+}
+
+func (h *GroupHandler) GetGroup(c *echo.Context) error {
+	params := newGroupPathParams(c)
+	model, err := h.service.GetGroup(c.Request().Context(), group.GetQuery{
+		WorkspaceID: params.workspaceID,
+		GroupID:     params.groupID,
+	})
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to get group", "err", err, "workspace_id", params.workspaceID, "group_id", params.groupID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.JSON(http.StatusOK, transport.NewGroupGetResponse(model))
+}
+
+func (h *GroupHandler) DeleteGroup(c *echo.Context) error {
+	params := newGroupPathParams(c)
+	err := h.service.DeleteGroup(c.Request().Context(), group.DeleteInput{
+		WorkspaceID: params.workspaceID,
+		GroupID:     params.groupID,
+	})
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to delete group", "err", err, "workspace_id", params.workspaceID, "group_id", params.groupID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *GroupHandler) UpdateGroupingRule(c *echo.Context) error {
+	params := newGroupPathParams(c)
+	request, err := transport.DecodeGroupGroupingRulesRequest(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError("request body must be valid JSON"))
+	}
+	input, err := request.ToDomain(params.workspaceID, params.groupID)
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		return c.JSON(http.StatusBadRequest, validationError("request body is invalid"))
+	}
+	if err := h.service.UpdateGroupingRule(c.Request().Context(), input); err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		if errors.Is(err, group.ErrNotFound) {
+			return c.JSON(http.StatusNotFound, exception.WrapResponse(exception.New("not_found", "Group not found", exception.WithDetails(map[string]any{}))))
+		}
+		h.logger.Warn("failed to update grouping rule", "err", err, "workspace_id", params.workspaceID, "group_id", params.groupID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *GroupHandler) ListIndividualMembers(c *echo.Context) error {
+	params := newGroupPathParams(c)
+	limit, err := h.paginationHelper.ParseLimit(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	token, err := h.paginationHelper.ParseToken(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	cursor, err := transport.DecodeIndividualMemberNextToken(token)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	page, err := h.service.ListIndividualMembers(c.Request().Context(), group.ListIndividualMembersQuery{
+		WorkspaceID: params.workspaceID,
+		GroupID:     params.groupID,
+		Limit:       limit,
+		Cursor:      cursor,
+	})
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to list group individual members", "err", err, "workspace_id", params.workspaceID, "group_id", params.groupID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	response, err := transport.NewIndividualMemberListResponse(page)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.JSON(http.StatusOK, response)
 }
 
 func validationError(message string) exception.ErrorResponse {
