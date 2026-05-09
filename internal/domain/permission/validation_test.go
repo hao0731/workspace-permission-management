@@ -178,3 +178,46 @@ func TestSaveInputValidateRejectsInvalidFields(t *testing.T) {
 		})
 	}
 }
+
+func TestGetQueryValidateAcceptsValidQuery(t *testing.T) {
+	query := GetQuery{
+		WorkspaceID: "workspace-1",
+		FunctionKey: "todo",
+	}
+
+	if err := query.Validate(); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+}
+
+func TestGetQueryValidateRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       GetQuery
+		wantMessage string
+	}{
+		{
+			name: "blank workspace id",
+			query: GetQuery{
+				WorkspaceID: "   ",
+				FunctionKey: "todo",
+			},
+			wantMessage: "workspace id is required",
+		},
+		{
+			name: "blank function key",
+			query: GetQuery{
+				WorkspaceID: "workspace-1",
+				FunctionKey: "   ",
+			},
+			wantMessage: "function key is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.query.Validate()
+			requireInvalidInput(t, err, tt.wantMessage)
+		})
+	}
+}

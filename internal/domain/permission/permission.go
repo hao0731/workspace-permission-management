@@ -6,6 +6,8 @@ type Permission struct {
 	ID               string
 	WorkspaceID      string
 	FunctionKey      string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 	OfficePermission PermissionSection
 	RemotePermission PermissionSection
 }
@@ -15,6 +17,11 @@ type SaveInput struct {
 	FunctionKey      string
 	OfficePermission *PermissionSection
 	RemotePermission *PermissionSection
+}
+
+type GetQuery struct {
+	WorkspaceID string
+	FunctionKey string
 }
 
 type PermissionSection struct {
