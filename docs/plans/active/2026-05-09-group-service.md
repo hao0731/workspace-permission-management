@@ -2786,8 +2786,21 @@ Record the observed verification output here during implementation:
 
 ```txt
 go test ./...:
+PASS
+ok   github.com/hao0731/workspace-permission-management/cmd/function-service
+ok   github.com/hao0731/workspace-permission-management/cmd/group-service
+ok   github.com/hao0731/workspace-permission-management/internal/domain/group
+ok   github.com/hao0731/workspace-permission-management/internal/group-service/config
+ok   github.com/hao0731/workspace-permission-management/internal/group-service/handlers
+ok   github.com/hao0731/workspace-permission-management/internal/group-service/repositories
+ok   github.com/hao0731/workspace-permission-management/internal/group-service/services
+ok   github.com/hao0731/workspace-permission-management/internal/group-service/transport
+Existing function-service, domain, shared, and web/flatted Go packages also passed or had no test files.
 ```
 
 ```txt
 GROUP_SERVICE_MONGODB_TEST_URI=mongodb://localhost:27017 go test ./internal/group-service/repositories -run Integration -v:
+FAILED due local environment, not assertion failure.
+Observed error: server selection error: context deadline exceeded; replica-set topology advertised mongodb:27017, and this host cannot resolve hostname "mongodb".
+Repository integration tests pass as skipped when GROUP_SERVICE_MONGODB_TEST_URI is unset.
 ```
