@@ -15,10 +15,14 @@ import (
 )
 
 type fakeHTTPPermissionService struct {
-	input permission.SaveInput
-	model permission.Permission
-	err   error
-	calls int
+	input    permission.SaveInput
+	query    permission.GetQuery
+	model    permission.Permission
+	found    bool
+	err      error
+	getErr   error
+	calls    int
+	getCalls int
 }
 
 func (f *fakeHTTPPermissionService) SavePermission(ctx context.Context, input permission.SaveInput) (permission.Permission, error) {
@@ -28,6 +32,15 @@ func (f *fakeHTTPPermissionService) SavePermission(ctx context.Context, input pe
 		return permission.Permission{}, f.err
 	}
 	return f.model, nil
+}
+
+func (f *fakeHTTPPermissionService) GetPermission(ctx context.Context, query permission.GetQuery) (permission.Permission, bool, error) {
+	f.getCalls++
+	f.query = query
+	if f.getErr != nil {
+		return permission.Permission{}, false, f.getErr
+	}
+	return f.model, f.found, nil
 }
 
 func validPermissionRequestBody() string {
@@ -156,6 +169,71 @@ func TestPermissionHandlerServiceFailure(t *testing.T) {
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/workspaces/workspace-1/functions/todo/permissions", strings.NewReader(validPermissionRequestBody()))
 	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestPermissionHandlerGetPermissionsFound(t *testing.T) {
+	service := &fakeHTTPPermissionService{model: permissionModel(), found: true}
+	e := echo.New()
+	RegisterPermissionRoutes(e, NewPermissionHandler(service, newTestLogger()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/permissions", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if service.getCalls != 1 {
+		t.Fatalf("service get calls = %d, want 1", service.getCalls)
+	}
+	if service.query.WorkspaceID != "workspace-1" || service.query.FunctionKey != "todo" {
+		t.Fatalf("query = %+v, want workspace-1/todo", service.query)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["permissions"] == nil {
+		t.Fatal("permissions = nil, want object")
+	}
+}
+
+func TestPermissionHandlerGetPermissionsNotFound(t *testing.T) {
+	service := &fakeHTTPPermissionService{found: false}
+	e := echo.New()
+	RegisterPermissionRoutes(e, NewPermissionHandler(service, newTestLogger()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/permissions", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := body["permissions"]; !ok {
+		t.Fatal("response missing permissions key")
+	}
+	if body["permissions"] != nil {
+		t.Fatalf("permissions = %#v, want nil", body["permissions"])
+	}
+}
+
+func TestPermissionHandlerGetPermissionsServiceFailure(t *testing.T) {
+	service := &fakeHTTPPermissionService{getErr: errors.New("database unavailable")}
+	e := echo.New()
+	RegisterPermissionRoutes(e, NewPermissionHandler(service, newTestLogger()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/workspaces/workspace-1/functions/todo/permissions", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
