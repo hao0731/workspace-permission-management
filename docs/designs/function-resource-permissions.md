@@ -2,7 +2,7 @@
 
 ## Background
 
-The workspace permission management system uses function resources, resource tags, groups, and actions to express ABAC permission rules. `function-service` already owns the `function_resources` projection used by permission targeting. This design adds a write API that stores the complete permission configuration for one workspace/function pair.
+The workspace permission management system uses function resources, resource tags, groups, and actions to express ABAC permission rules. `function-service` already owns the `function_resources` projection used by permission targeting. This design adds APIs that store and retrieve the complete permission configuration for one workspace/function pair.
 
 Related context:
 
@@ -24,15 +24,19 @@ Policy alignment:
 - HTTP handlers remain thin and only parse path/body input, invoke the service, and render responses or mapped errors.
 - Request and response DTOs belong in `internal/function-service/transport`.
 - Domain permission types and invariants stay independent of Echo and MongoDB.
-- The service owns the replace workflow, `rule_id` generation, and deterministic test seams for ID generation.
+- The service owns the replace/read workflows, `rule_id` generation, timestamp assignment, and deterministic test seams for ID and clock generation.
 - MongoDB access remains isolated in `internal/function-service/repositories`.
 - This design document is stored under `docs/designs/` and linked from the existing function-service design.
 
 ## Goals
 
 - Expose `PUT /api/v1/workspaces/:workspace_id/functions/:function_key/permissions`.
+- Expose `GET /api/v1/workspaces/:workspace_id/functions/:function_key/permissions`.
 - Store one complete permission configuration per `workspace_id + function_key`.
+- Retrieve the current permission configuration for one `workspace_id + function_key`.
+- Return `permissions: null` when no permission document exists for the requested `workspace_id + function_key`.
 - Persist the permission configuration in MongoDB collection `function_resource_permissions`.
+- Persist `created_at` and `updated_at` timestamps for each permission document.
 - Generate `rule_id` values for request extra rules that omit `rule_id`.
 - Persist every extra rule with a `rule_id`.
 - Persist baseline rule `enabled` values supplied by the request.
@@ -40,12 +44,14 @@ Policy alignment:
 - Deduplicate semantically identical extra rules before persistence.
 - Return `200` with the persisted permission configuration after a successful write.
 - Preserve an existing MongoDB document `_id` when replacing the permission configuration for the same `workspace_id + function_key`.
+- Preserve an existing MongoDB document `created_at` when replacing the permission configuration for the same `workspace_id + function_key`.
 - Keep validation, service workflow, persistence, and transport mapping aligned with existing `function-service` boundaries.
 
 ## Non-Goals
 
 - Do not implement permission evaluation.
 - Do not validate whether `workspace_id`, `function_key`, `group_ids`, `action_id`, or `resource_tags` reference existing records in other services.
+- Do not query `function_resources` to decide whether the GET endpoint should return `permissions: null`; null only means no permission document exists.
 - Do not implement partial updates, rule-level PATCH, rule deletion APIs, or rule history.
 - Do not publish permission-changed events in this phase.
 - Do not add frontend changes.
@@ -53,19 +59,20 @@ Policy alignment:
 
 ## Recommended Approach
 
-Use a single-document replace design. `workspace_id + function_key` uniquely identifies the permission configuration for a function inside a workspace. `PUT` creates the document when it does not exist and replaces the permission body when it does exist. Existing documents keep their `_id`; new documents receive a generated UUID `_id`.
+Use a single-document read/replace design. `workspace_id + function_key` uniquely identifies the permission configuration for a function inside a workspace. `PUT` creates the document when it does not exist and replaces the permission body when it does exist. Existing documents keep their `_id` and `created_at`; new documents receive a generated UUID `_id`, `created_at`, and `updated_at`. `GET` reads the same document by `workspace_id + function_key`.
 
-This approach matches HTTP `PUT` semantics, keeps client behavior simple, and avoids introducing rule-level merge behavior before there is a clear product need for partial edits.
+This approach matches HTTP `PUT` semantics, keeps client behavior simple, makes the read API symmetrical with the write API, and avoids introducing rule-level merge behavior before there is a clear product need for partial edits.
 
 Alternatives considered:
 
 - Rule-level merge: preserves unspecified rules, but conflicts with full-replacement `PUT` semantics and would need a separate delete or tombstone model.
 - Versioned permission documents: enables history and audit, but requires current-version lookup, retention policy, and version conflict behavior that are outside this phase.
 - Client-generated required `rule_id`: makes writes more deterministic for clients, but the requested API allows missing `rule_id`; backend generation keeps the request ergonomic.
+- GET that validates `function_resources`: can distinguish an unknown function from an unset permission configuration, but introduces a cross-aggregate read that is not needed for the requested `permissions: null` contract.
 
 ## API Contract
 
-Endpoint:
+PUT endpoint:
 
 ```http
 PUT /api/v1/workspaces/:workspace_id/functions/:function_key/permissions
@@ -113,7 +120,7 @@ Request body:
 }
 ```
 
-Success response:
+PUT success response:
 
 ```http
 HTTP/1.1 200 OK
@@ -157,11 +164,79 @@ HTTP/1.1 200 OK
 }
 ```
 
+GET endpoint:
+
+```http
+GET /api/v1/workspaces/:workspace_id/functions/:function_key/permissions
+```
+
+GET success response when a permission document exists:
+
+```http
+HTTP/1.1 200 OK
+```
+
+```json
+{
+  "permissions": {
+    "office_permission": {
+      "baseline_rule": {
+        "action_id": "view",
+        "resource_tags": ["section_1"],
+        "enabled": true
+      },
+      "extra_rules": [
+        {
+          "rule_id": "rule-1",
+          "group_ids": ["group-1"],
+          "action_id": "edit",
+          "resource_tags": ["section_1"],
+          "expiration_date": "2026-06-01T00:00:00Z"
+        },
+        {
+          "rule_id": "rule-2",
+          "group_ids": ["group-2"],
+          "action_id": "delete",
+          "resource_tags": ["section_2"],
+          "expiration_date": "2026-07-01T00:00:00Z"
+        }
+      ]
+    },
+    "remote_permission": {
+      "baseline_rule": {
+        "action_id": "view",
+        "resource_tags": ["remote"],
+        "enabled": false
+      },
+      "extra_rules": []
+    }
+  }
+}
+```
+
+GET success response when no permission document exists for `workspace_id + function_key`:
+
+```http
+HTTP/1.1 200 OK
+```
+
+```json
+{
+  "permissions": null
+}
+```
+
 Field contract:
 
 - Public JSON field names use `snake_case`.
 - `expiration_date` must be accepted as an RFC3339 timestamp string and stored as a MongoDB Date.
-- The response returns timestamps as RFC3339 strings through Go's default JSON encoding for `time.Time`.
+- PUT and GET responses return `expiration_date` timestamps as RFC3339 strings through Go's default JSON encoding for `time.Time`.
+- PUT and GET responses use the same `permissions` wrapper.
+- PUT success responses always include a non-null `permissions` object.
+- GET responses include a non-null `permissions` object when a permission document exists.
+- GET responses include `permissions: null` when no permission document exists for `workspace_id + function_key`.
+- `permissions: null` does not mean the function or workspace was checked and found missing; this endpoint does not validate existence in `function_resources` or other services.
+- `created_at` and `updated_at` are persistence metadata and are not included in the public response contract in this phase.
 - Request and response baseline rules include `enabled`.
 - Baseline rule `enabled` is client-controlled and must be persisted exactly as supplied.
 - Response extra rules always include `rule_id`.
@@ -170,7 +245,9 @@ Field contract:
 
 ## Request Validation
 
-Transport-level validation should reject malformed JSON, invalid timestamp formats, body shape errors, and missing baseline rule `enabled` values. Implementations should model request `enabled` in a way that distinguishes an omitted field from `enabled: false`.
+PUT transport-level validation should reject malformed JSON, invalid timestamp formats, body shape errors, and missing baseline rule `enabled` values. Implementations should model request `enabled` in a way that distinguishes an omitted field from `enabled: false`.
+
+GET has no request body. Its transport-level validation is limited to path parameter extraction and validation.
 
 Domain or service validation should reject:
 
@@ -210,6 +287,8 @@ HTTP status mapping:
 - `400` for malformed JSON, invalid timestamp formats, path validation, and request validation failures.
 - `500` for repository or unexpected service failures.
 - `200` for successful create or replace.
+- `200` for successful read when a permission document exists.
+- `200` with `permissions: null` for successful read when no permission document exists for `workspace_id + function_key`.
 
 ## Persistence Semantics
 
@@ -219,25 +298,37 @@ Identity:
 
 - `workspace_id + function_key` is the logical unique key.
 - Existing documents matching that key are replaced in place and keep their `_id`.
+- Existing documents matching that key keep their original `created_at`.
 - New documents get a generated UUID `_id`.
+- New documents get `created_at` and `updated_at` from a service-level clock.
 
 Write behavior:
 
 - Treat each request as the complete desired permission configuration.
 - Replace `office_permission` and `remote_permission` atomically in one MongoDB update.
+- Set `updated_at` to the current service clock time on every successful PUT.
+- Set both `created_at` and `updated_at` on insert.
+- Preserve `created_at` on replace.
 - Generate `rule_id` values before persistence for any extra rules that omit them.
 - Preserve request-provided `rule_id` values after validation.
 - Preserve request-provided baseline rule `enabled` values.
 - Remove semantically duplicate extra rules before generating missing `rule_id` values and before persistence.
 - Return the normalized persisted model from the service after MongoDB succeeds.
 
+Read behavior:
+
+- Read by `{ workspace_id, function_key }`.
+- Return the stored permission body when a document exists.
+- Return an empty optional result when no document exists; the handler maps this to `200 OK` with `permissions: null`.
+- Do not query `function_resources` or other services while resolving the GET response.
+
 Recommended repository operation:
 
-- First try to update by `{ workspace_id, function_key }` with `$set` for permission fields.
-- If no document matches, insert a new document with generated `_id`.
+- First try to update by `{ workspace_id, function_key }` with `$set` for permission fields and `updated_at`.
+- If no document matches, insert a new document with generated `_id`, `created_at`, and `updated_at`.
 - If insert hits a duplicate key because another request created the document concurrently, retry the update once.
 
-This avoids replacing `_id` on existing documents and keeps the repository deterministic under common concurrent create races.
+This avoids replacing `_id` or `created_at` on existing documents and keeps the repository deterministic under common concurrent create races.
 
 ## Extra Rule Normalization
 
@@ -294,6 +385,8 @@ Document schema:
   "_id": "<UUID>",
   "workspace_id": "<WORKSPACE_ID>",
   "function_key": "<FUNCTION_KEY>",
+  "created_at": "2026-05-09T00:00:00Z",
+  "updated_at": "2026-05-09T00:00:00Z",
   "office_permission": {
     "baseline_rule": {
       "action_id": "<ACTION_ID>",
@@ -325,6 +418,8 @@ Field notes:
 
 - `_id` is a backend-generated UUID for the permission document.
 - `workspace_id` and `function_key` identify the owner and function.
+- `created_at` is set when the permission document is first inserted and is preserved across later PUT replacements.
+- `updated_at` is set when the permission document is inserted and refreshed on each later successful PUT replacement.
 - `office_permission` stores the rules for office access.
 - `remote_permission` stores the rules for remote access.
 - `baseline_rule.enabled` is persisted from the request and may be `true` or `false`.
@@ -341,7 +436,7 @@ Indexes:
 Rationale:
 
 - The unique index enforces the one-document-per-workspace-function contract.
-- Querying and replacing by workspace/function does not need a separate read path in this phase.
+- Querying and replacing by workspace/function use the same logical identity.
 
 ## Service Structure
 
@@ -369,11 +464,11 @@ internal/function-service/transport/
 
 Responsibilities:
 
-- `internal/domain/permission`: framework-independent permission models, baseline rule and extra rule models, normalized save input, validation, and domain errors.
-- `internal/function-service/transport`: HTTP request/response DTOs, timestamp parsing through `time.Time`, JSON field names, and DTO/domain mapping.
-- `internal/function-service/services`: save permission workflow, validation invocation, generated document/rule IDs, and repository interface definition at the consumer side.
-- `internal/function-service/repositories`: MongoDB document mapping, unique index initialization, update-or-insert behavior, and duplicate-key retry.
-- `internal/function-service/handlers`: Echo route registration, path/body parsing, service invocation, and HTTP error mapping.
+- `internal/domain/permission`: framework-independent permission models, persistence metadata fields, baseline rule and extra rule models, normalized save input, get query identity, validation, and domain errors.
+- `internal/function-service/transport`: HTTP request/response DTOs, timestamp parsing through `time.Time`, JSON field names, nullable GET response wrapper, and DTO/domain mapping.
+- `internal/function-service/services`: save permission workflow, get permission workflow, validation invocation, generated document/rule IDs, timestamp assignment, and repository interface definition at the consumer side.
+- `internal/function-service/repositories`: MongoDB document mapping, unique index initialization, update-or-insert behavior, duplicate-key retry, and find-by-workspace-function behavior.
+- `internal/function-service/handlers`: Echo route registration, path/body parsing, service invocation, response rendering, and HTTP error mapping.
 - `cmd/function-service/main.go`: repository construction, index initialization, service construction, and route registration.
 
 The permission domain should be separate from `internal/domain/resource` because the permission aggregate has different invariants and persistence shape. It can still use resource tag strings as plain values without depending on the resource projection model.
@@ -405,9 +500,12 @@ It should include:
 - A successful PUT request with one omitted `rule_id`.
 - A successful PUT request that sets one baseline rule to `enabled: false`.
 - A successful PUT request that sends duplicate semantic extra rules and receives only one in the response.
+- A successful GET request after permissions have been saved.
+- A successful GET request for a `workspace_id + function_key` with no permission document, noting that it returns `permissions: null`.
 - A validation error example for an invalid or missing field.
 - A validation error example for duplicate `rule_id` values.
 - A note that success returns `200` for both create and replace.
+- A note that GET returns `200` for both found and not-yet-configured permission documents.
 
 ## Testing Strategy
 
@@ -426,18 +524,27 @@ Domain tests:
 Service tests:
 
 - Save generates document ID and missing rule IDs on create.
+- Save assigns `created_at` and `updated_at` values from an injected clock before calling the repository.
+- Save uses a deterministic clock in tests.
 - Save preserves request-provided rule IDs.
 - Save preserves request-provided baseline `enabled` values in the returned model.
 - Save removes semantically duplicate extra rules before ID generation and persistence.
 - Save keeps generated rule IDs in the returned model.
 - Save returns validation errors before repository calls.
 - Save wraps repository failures.
+- Get returns the permission model when the repository finds one.
+- Get returns an empty optional result when the repository reports not found.
+- Get wraps repository failures other than not found.
 
 Repository tests:
 
 - Ensure the unique `{ workspace_id, function_key }` index.
 - Insert a new permission document with generated `_id`.
 - Replace an existing permission document while preserving `_id`.
+- Insert a new permission document with `created_at` and `updated_at`.
+- Replace an existing permission document while preserving `created_at` and updating `updated_at`.
+- Find a permission document by `workspace_id + function_key`.
+- Return a not-found signal when no permission document exists for `workspace_id + function_key`.
 - Persist request-provided baseline `enabled` values, including `false`.
 - Persist every extra rule with `rule_id`.
 - Persist only normalized, deduplicated extra rules.
@@ -446,9 +553,12 @@ Repository tests:
 Handler tests:
 
 - Register the `PUT /api/v1/workspaces/:workspace_id/functions/:function_key/permissions` route.
+- Register the `GET /api/v1/workspaces/:workspace_id/functions/:function_key/permissions` route.
 - Decode a valid request and return `200`.
 - Return generated `rule_id` values in the response.
 - Return only one extra rule when the request contains duplicate semantic extra rules.
+- Return the persisted permission configuration for GET when it exists.
+- Return `200` with `permissions: null` for GET when no permission document exists.
 - Return `400` when the request contains duplicate `rule_id` values.
 - Return `400` for malformed JSON.
 - Return `400` for validation failures.
@@ -461,6 +571,9 @@ Transport tests:
 - Preserve request order before service-level semantic deduplication so the service can keep the first duplicate rule.
 - Decode RFC3339 `expiration_date` values into `time.Time`.
 - Encode response baseline `enabled`.
+- Encode GET found responses with the same `permissions` object as PUT success responses.
+- Encode GET not-found responses as exactly `{ "permissions": null }`.
+- Exclude `created_at` and `updated_at` from public permission responses.
 - Map request DTOs to domain inputs without leaking Echo or MongoDB types.
 - Map domain permission models to the response shape exactly.
 
@@ -474,11 +587,12 @@ Additional verification may include `go vet ./...` if implementation touches sta
 
 ## Rollout and Compatibility Notes
 
-- This is a new API and a new MongoDB collection, so it does not require migrating existing resource projection documents.
+- This endpoint family uses the `function_resource_permissions` collection and does not require migrating existing `function_resources` projection documents.
 - Deployments must ensure the service can create or verify the unique index on `function_resource_permissions`.
 - Because `PUT` replaces the full permission body, clients must send the complete desired configuration every time.
 - A retry of the same request that omitted `rule_id` can generate new `rule_id` values if the first response was lost and the client retries with the same omitted-rule payload. Clients that need stable rule identity across retries should send `rule_id`.
-- The first implementation does not expose a read endpoint for permissions. Clients receive the persisted model from the PUT response.
+- Existing permission documents written before `created_at` and `updated_at` existed need a compatibility decision before rollout. The implementation can either backfill both fields or tolerate missing fields while rewriting them on the next successful PUT.
+- GET clients should treat `permissions: null` as "permission configuration has not been saved yet" rather than "workspace or function does not exist."
 
 ## Architecture Decisions
 
@@ -510,8 +624,16 @@ Additional verification may include `go vet ./...` if implementation touches sta
    - Rationale: Permission rules and resource projections have different invariants and persistence lifecycles.
    - Trade-off: Resource tag strings are duplicated as value fields rather than centralized in a shared type.
 
+8. Return `200 OK` with `permissions: null` when GET finds no permission document.
+   - Rationale: The absence of a permission configuration is a valid empty state for this API.
+   - Trade-off: Clients cannot use this endpoint alone to distinguish an unknown function from a function with no saved permission configuration.
+
+9. Store `created_at` and `updated_at` as persistence metadata but omit them from the public response.
+   - Rationale: Timestamps support storage auditing and future operational needs without expanding the client-facing payload requested for this phase.
+   - Trade-off: Clients cannot display permission document freshness until a later response contract intentionally exposes these fields.
+
 ## Implementation Plan Notes
 
 The follow-up implementation plan should be created under `docs/plans/active/` and link back to this design document.
 
-The plan should use test-driven steps for domain validation, transport mapping, service ID generation, repository upsert/replace behavior, handler error mapping, route registration, API examples, and startup index initialization.
+The plan should use test-driven steps for domain validation, transport mapping, service ID and timestamp generation, repository upsert/replace/read behavior, handler error mapping, route registration, API examples, and startup index initialization.

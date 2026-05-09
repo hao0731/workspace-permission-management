@@ -10,7 +10,7 @@ Related concept definitions are documented in [../concept.md](../concept.md).
 
 Related designs:
 
-- [Function Resource Permissions Design](function-resource-permissions.md) extends `function-service` with a `PUT` API for storing one permission configuration per workspace/function pair in `function_resource_permissions`.
+- [Function Resource Permissions Design](function-resource-permissions.md) extends `function-service` with `PUT` and `GET` APIs for storing and retrieving one permission configuration per workspace/function pair in `function_resource_permissions`.
 
 ## Classification and Policies
 
