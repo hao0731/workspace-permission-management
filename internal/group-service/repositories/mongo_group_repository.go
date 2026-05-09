@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ const (
 	groupsActiveNameUniqueIndexName          = "groups_active_workspace_normalized_name_unique"
 	groupsWorkspaceCreatedIndexName          = "groups_workspace_created_id"
 	membersActiveGroupAccountUniqueIndexName = "group_individual_members_active_group_account_unique"
-	membersGroupIDIndexName                  = "group_individual_members_group_id"
+	membersGroupCreatedIndexName             = "group_individual_members_group_created_id"
 )
 
 type MongoGroupRepository struct {
@@ -107,6 +108,115 @@ func (r *MongoGroupRepository) Create(ctx context.Context, input group.Group) (g
 	return input, nil
 }
 
+func (r *MongoGroupRepository) Get(ctx context.Context, query group.GetQuery) (*group.Group, error) {
+	var doc groupDocument
+	err := r.groups.FindOne(ctx, activeGroupFilter(query)).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find group: %w", err)
+	}
+	model := doc.toDomain(nil)
+	return &model, nil
+}
+
+func (r *MongoGroupRepository) Delete(ctx context.Context, input group.DeleteInput, deletedAt time.Time) error {
+	session, err := r.client.StartSession()
+	if err != nil {
+		return fmt.Errorf("start group delete session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		result, updateErr := r.groups.UpdateOne(sessionCtx,
+			activeGroupFilter(group.GetQuery(input)),
+			bson.M{"$set": bson.M{"deleted_at": deletedAt, "updated_at": deletedAt}},
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("soft delete group: %w", updateErr)
+		}
+		if result.MatchedCount == 0 {
+			return nil, nil
+		}
+		if _, updateMembersErr := r.members.UpdateMany(sessionCtx,
+			bson.M{"group_id": input.GroupID, "deleted_at": nil},
+			bson.M{"$set": bson.M{"deleted_at": deletedAt, "updated_at": deletedAt}},
+		); updateMembersErr != nil {
+			return nil, fmt.Errorf("soft delete group individual members: %w", updateMembersErr)
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *MongoGroupRepository) UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput, updatedAt time.Time) error {
+	session, err := r.client.StartSession()
+	if err != nil {
+		return fmt.Errorf("start grouping rule update session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		result, updateErr := r.groups.UpdateOne(sessionCtx,
+			activeGroupFilter(group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID}),
+			bson.M{"$set": bson.M{
+				"grouping_rule": newGroupingRuleDocument(group.GroupingRule{Rules: input.Rules, ExpirationDate: input.ExpirationDate}),
+				"updated_at":    updatedAt,
+			}},
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("update grouping rule: %w", updateErr)
+		}
+		if result.MatchedCount == 0 {
+			return nil, group.ErrNotFound
+		}
+		if len(input.Rules) == 0 {
+			memberCount, memberCountErr := r.members.CountDocuments(sessionCtx, bson.M{"group_id": input.GroupID, "deleted_at": nil})
+			if memberCountErr != nil {
+				return nil, fmt.Errorf("count active individual members: %w", memberCountErr)
+			}
+			if memberCount == 0 {
+				return nil, fmt.Errorf("%w: at least one membership source is required", group.ErrInvalidInput)
+			}
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *MongoGroupRepository) ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error) {
+	groupDoc, err := r.Get(ctx, group.GetQuery{WorkspaceID: query.WorkspaceID, GroupID: query.GroupID})
+	if err != nil {
+		return group.IndividualMemberPage{}, err
+	}
+	if groupDoc == nil {
+		return group.IndividualMemberPage{Members: []group.IndividualMember{}}, nil
+	}
+	findOptions := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}).
+		SetLimit(int64(query.Limit + 1))
+	cursor, err := r.members.Find(ctx, buildIndividualMemberListFilter(query), findOptions)
+	if err != nil {
+		return group.IndividualMemberPage{}, fmt.Errorf("find group individual members: %w", err)
+	}
+	defer func() {
+		_ = cursor.Close(ctx)
+	}()
+
+	var docs []individualMemberDocument
+	if err := cursor.All(ctx, &docs); err != nil {
+		return group.IndividualMemberPage{}, fmt.Errorf("decode group individual members: %w", err)
+	}
+	return buildIndividualMemberPage(docs, query.Limit), nil
+}
+
 func groupIndexModels() []mongo.IndexModel {
 	return []mongo.IndexModel{
 		{
@@ -143,10 +253,36 @@ func individualMemberIndexModels() []mongo.IndexModel {
 				SetPartialFilterExpression(bson.M{"deleted_at": nil}),
 		},
 		{
-			Keys:    bson.D{{Key: "group_id", Value: 1}},
-			Options: options.Index().SetName(membersGroupIDIndexName),
+			Keys: bson.D{
+				{Key: "group_id", Value: 1},
+				{Key: "created_at", Value: -1},
+				{Key: "_id", Value: -1},
+			},
+			Options: options.Index().SetName(membersGroupCreatedIndexName),
 		},
 	}
+}
+
+func activeGroupFilter(query group.GetQuery) bson.M {
+	return bson.M{
+		"_id":          query.GroupID,
+		"workspace_id": query.WorkspaceID,
+		"deleted_at":   nil,
+	}
+}
+
+func buildIndividualMemberListFilter(query group.ListIndividualMembersQuery) bson.M {
+	filter := bson.M{
+		"group_id":   query.GroupID,
+		"deleted_at": nil,
+	}
+	if query.Cursor != nil {
+		filter["$or"] = bson.A{
+			bson.M{"created_at": bson.M{"$lt": query.Cursor.CreatedAt}},
+			bson.M{"created_at": query.Cursor.CreatedAt, "_id": bson.M{"$lt": query.Cursor.ID}},
+		}
+	}
+	return filter
 }
 
 func mapGroupInsertError(err error) error {
@@ -161,29 +297,30 @@ func isDuplicateIndex(err error, indexName string) bool {
 }
 
 func newGroupDocument(model group.Group) groupDocument {
-	rules := make([]ruleDocument, 0, len(model.GroupingRule.Rules))
-	for _, rule := range model.GroupingRule.Rules {
-		rules = append(rules, ruleDocument{
-			AttributeKey: rule.AttributeKey,
-			Operator:     rule.Operator,
-			Multi:        rule.Multi,
-			Value:        rule.Value,
-		})
-	}
 	return groupDocument{
 		ID:             model.ID,
 		WorkspaceID:    model.WorkspaceID,
 		Name:           model.Name,
 		NormalizedName: model.NormalizedName,
 		Description:    model.Description,
-		GroupingRule: groupingRuleDocument{
-			Rules:          rules,
-			ExpirationDate: model.GroupingRule.ExpirationDate,
-		},
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
-		DeletedAt: model.DeletedAt,
+		GroupingRule:   newGroupingRuleDocument(model.GroupingRule),
+		CreatedAt:      model.CreatedAt,
+		UpdatedAt:      model.UpdatedAt,
+		DeletedAt:      model.DeletedAt,
 	}
+}
+
+func newGroupingRuleDocument(rule group.GroupingRule) groupingRuleDocument {
+	rules := make([]ruleDocument, 0, len(rule.Rules))
+	for _, item := range rule.Rules {
+		rules = append(rules, ruleDocument{
+			AttributeKey: item.AttributeKey,
+			Operator:     item.Operator,
+			Multi:        item.Multi,
+			Value:        item.Value,
+		})
+	}
+	return groupingRuleDocument{Rules: rules, ExpirationDate: rule.ExpirationDate}
 }
 
 func newIndividualMemberDocuments(model group.Group) []individualMemberDocument {
@@ -200,6 +337,35 @@ func newIndividualMemberDocuments(model group.Group) []individualMemberDocument 
 		})
 	}
 	return docs
+}
+
+func (d individualMemberDocument) toDomain() group.IndividualMember {
+	return group.IndividualMember{
+		ID:             d.ID,
+		GroupID:        d.GroupID,
+		NTAccount:      d.NTAccount,
+		ExpirationDate: d.ExpirationDate,
+		CreatedAt:      d.CreatedAt,
+		UpdatedAt:      d.UpdatedAt,
+		DeletedAt:      d.DeletedAt,
+	}
+}
+
+func buildIndividualMemberPage(docs []individualMemberDocument, limit int) group.IndividualMemberPage {
+	hasNext := len(docs) > limit
+	if hasNext {
+		docs = docs[:limit]
+	}
+	members := make([]group.IndividualMember, 0, len(docs))
+	for _, doc := range docs {
+		members = append(members, doc.toDomain())
+	}
+	var nextCursor *group.IndividualMemberCursor
+	if hasNext && len(members) > 0 {
+		last := members[len(members)-1]
+		nextCursor = &group.IndividualMemberCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return group.IndividualMemberPage{Members: members, HasNextPage: hasNext, NextCursor: nextCursor}
 }
 
 func (d groupDocument) toDomain(members []group.IndividualMember) group.Group {

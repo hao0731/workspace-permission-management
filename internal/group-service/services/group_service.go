@@ -13,6 +13,10 @@ import (
 
 type GroupRepository interface {
 	Create(ctx context.Context, input group.Group) (group.Group, error)
+	Get(ctx context.Context, query group.GetQuery) (*group.Group, error)
+	Delete(ctx context.Context, input group.DeleteInput, deletedAt time.Time) error
+	UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput, updatedAt time.Time) error
+	ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error)
 }
 
 type GroupOption func(*GroupService)
@@ -92,6 +96,56 @@ func (s *GroupService) CreateGroup(ctx context.Context, input group.CreateInput)
 		return group.Group{}, fmt.Errorf("create group: %w", err)
 	}
 	return saved, nil
+}
+
+func (s *GroupService) GetGroup(ctx context.Context, query group.GetQuery) (*group.Group, error) {
+	query = query.Normalize()
+	if err := query.Validate(); err != nil {
+		return nil, err
+	}
+	model, err := s.repository.Get(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("get group: %w", err)
+	}
+	return model, nil
+}
+
+func (s *GroupService) DeleteGroup(ctx context.Context, input group.DeleteInput) error {
+	input = input.Normalize()
+	if err := input.Validate(); err != nil {
+		return err
+	}
+	if err := s.repository.Delete(ctx, input, s.now().UTC()); err != nil {
+		return fmt.Errorf("delete group: %w", err)
+	}
+	return nil
+}
+
+func (s *GroupService) UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput) error {
+	now := s.now().UTC()
+	input = input.Normalize()
+	if err := input.Validate(now, s.validateOptions...); err != nil {
+		return err
+	}
+	if err := s.repository.UpdateGroupingRule(ctx, input, now); err != nil {
+		if errors.Is(err, group.ErrNotFound) || errors.Is(err, group.ErrInvalidInput) {
+			return err
+		}
+		return fmt.Errorf("update grouping rule: %w", err)
+	}
+	return nil
+}
+
+func (s *GroupService) ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error) {
+	query = query.Normalize()
+	if err := query.Validate(); err != nil {
+		return group.IndividualMemberPage{}, err
+	}
+	page, err := s.repository.ListIndividualMembers(ctx, query)
+	if err != nil {
+		return group.IndividualMemberPage{}, fmt.Errorf("list group individual members: %w", err)
+	}
+	return page, nil
 }
 
 func (s *GroupService) newIndividualMembers(groupID string, input []group.IndividualMember, now time.Time) []group.IndividualMember {

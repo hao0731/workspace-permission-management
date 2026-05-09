@@ -111,6 +111,46 @@ func TestGroupCreateRequestToDomainRejectsMissingRuleMulti(t *testing.T) {
 	}
 }
 
+func TestGroupGroupingRulesRequestToDomain(t *testing.T) {
+	multi := false
+	request := GroupGroupingRulesRequest{
+		Rules: []RuleRequest{{
+			AttributeKey: "department",
+			Operator:     "eq",
+			Multi:        &multi,
+			Value:        "ABCD-123",
+		}},
+		ExpirationDate: JSONTime{Time: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+	}
+
+	input, err := request.ToDomain("workspace-1", "group-1")
+	if err != nil {
+		t.Fatalf("ToDomain error = %v, want nil", err)
+	}
+	if input.WorkspaceID != "workspace-1" || input.GroupID != "group-1" {
+		t.Fatalf("identity = %q/%q, want workspace-1/group-1", input.WorkspaceID, input.GroupID)
+	}
+	if len(input.Rules) != 1 || input.Rules[0].Operator != group.OperatorEq {
+		t.Fatalf("rules = %+v, want one eq rule", input.Rules)
+	}
+}
+
+func TestGroupGroupingRulesRequestRejectsMissingMulti(t *testing.T) {
+	request := GroupGroupingRulesRequest{
+		Rules: []RuleRequest{{
+			AttributeKey: "department",
+			Operator:     "eq",
+			Value:        "ABCD-123",
+		}},
+		ExpirationDate: JSONTime{Time: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+	}
+
+	_, err := request.ToDomain("workspace-1", "group-1")
+	if !errors.Is(err, group.ErrInvalidInput) {
+		t.Fatalf("ToDomain error = %v, want ErrInvalidInput", err)
+	}
+}
+
 func TestJSONTimeRejectsInvalidTimestamp(t *testing.T) {
 	_, err := DecodeGroupCreateRequest(strings.NewReader(`{
 		"name": "Design Reviewers",

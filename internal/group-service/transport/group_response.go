@@ -10,12 +10,23 @@ type GroupCreateResponse struct {
 	Group GroupResponse `json:"group"`
 }
 
+type GroupGetResponse struct {
+	Group *GroupSummaryResponse `json:"group"`
+}
+
 type GroupResponse struct {
 	ID                string                     `json:"id"`
 	Name              string                     `json:"name"`
 	Description       string                     `json:"description"`
 	GroupingRule      GroupingRuleResponse       `json:"grouping_rule"`
 	IndividualMembers []IndividualMemberResponse `json:"individual_members"`
+}
+
+type GroupSummaryResponse struct {
+	ID           string               `json:"id"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description"`
+	GroupingRule GroupingRuleResponse `json:"grouping_rule"`
 }
 
 type GroupingRuleResponse struct {
@@ -35,20 +46,28 @@ type IndividualMemberResponse struct {
 	ExpirationDate time.Time `json:"expiration_date"`
 }
 
+type IndividualMemberListResponse struct {
+	Members  []IndividualMemberResponse `json:"members"`
+	PageInfo PageInfoResponse           `json:"page_info"`
+}
+
+type PageInfoResponse struct {
+	HasNextPage bool   `json:"has_next_page"`
+	NextToken   string `json:"next_token"`
+}
+
 func NewGroupCreateResponse(model group.Group) GroupCreateResponse {
 	return GroupCreateResponse{Group: newGroupResponse(model)}
 }
 
-func newGroupResponse(model group.Group) GroupResponse {
-	rules := make([]RuleResponse, 0, len(model.GroupingRule.Rules))
-	for _, rule := range model.GroupingRule.Rules {
-		rules = append(rules, RuleResponse{
-			AttributeKey: rule.AttributeKey,
-			Operator:     rule.Operator,
-			Multi:        rule.Multi,
-			Value:        rule.Value,
-		})
+func NewGroupGetResponse(model *group.Group) GroupGetResponse {
+	if model == nil {
+		return GroupGetResponse{Group: nil}
 	}
+	return GroupGetResponse{Group: newGroupSummaryResponse(*model)}
+}
+
+func newGroupResponse(model group.Group) GroupResponse {
 	members := make([]IndividualMemberResponse, 0, len(model.IndividualMembers))
 	for _, member := range model.IndividualMembers {
 		members = append(members, IndividualMemberResponse{
@@ -57,13 +76,53 @@ func newGroupResponse(model group.Group) GroupResponse {
 		})
 	}
 	return GroupResponse{
-		ID:          model.ID,
-		Name:        model.Name,
-		Description: model.Description,
-		GroupingRule: GroupingRuleResponse{
-			Rules:          rules,
-			ExpirationDate: model.GroupingRule.ExpirationDate,
-		},
+		ID:                model.ID,
+		Name:              model.Name,
+		Description:       model.Description,
+		GroupingRule:      newGroupingRuleResponse(model.GroupingRule),
 		IndividualMembers: members,
 	}
+}
+
+func newGroupSummaryResponse(model group.Group) *GroupSummaryResponse {
+	return &GroupSummaryResponse{
+		ID:           model.ID,
+		Name:         model.Name,
+		Description:  model.Description,
+		GroupingRule: newGroupingRuleResponse(model.GroupingRule),
+	}
+}
+
+func newGroupingRuleResponse(rule group.GroupingRule) GroupingRuleResponse {
+	rules := make([]RuleResponse, 0, len(rule.Rules))
+	for _, item := range rule.Rules {
+		rules = append(rules, RuleResponse{
+			AttributeKey: item.AttributeKey,
+			Operator:     item.Operator,
+			Multi:        item.Multi,
+			Value:        item.Value,
+		})
+	}
+	return GroupingRuleResponse{Rules: rules, ExpirationDate: rule.ExpirationDate}
+}
+
+func NewIndividualMemberListResponse(page group.IndividualMemberPage) (IndividualMemberListResponse, error) {
+	members := make([]IndividualMemberResponse, 0, len(page.Members))
+	for _, member := range page.Members {
+		members = append(members, IndividualMemberResponse{
+			NTAccount:      member.NTAccount,
+			ExpirationDate: member.ExpirationDate,
+		})
+	}
+	nextToken, err := EncodeIndividualMemberNextToken(page.NextCursor)
+	if err != nil {
+		return IndividualMemberListResponse{}, err
+	}
+	return IndividualMemberListResponse{
+		Members: members,
+		PageInfo: PageInfoResponse{
+			HasNextPage: page.HasNextPage,
+			NextToken:   nextToken,
+		},
+	}, nil
 }

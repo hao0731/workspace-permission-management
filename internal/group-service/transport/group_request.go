@@ -33,6 +33,11 @@ type IndividualMemberRequest struct {
 	ExpirationDate JSONTime `json:"expiration_date"`
 }
 
+type GroupGroupingRulesRequest struct {
+	Rules          []RuleRequest `json:"rules"`
+	ExpirationDate JSONTime      `json:"expiration_date"`
+}
+
 func DecodeGroupCreateRequest(body io.Reader) (GroupCreateRequest, error) {
 	var request GroupCreateRequest
 	decoder := json.NewDecoder(body)
@@ -46,17 +51,9 @@ func (request GroupCreateRequest) ToDomain(workspaceID string) (group.CreateInpu
 	if request.GroupingRule == nil {
 		return group.CreateInput{}, invalidGroupRequest("grouping rule is required")
 	}
-	rules := make([]group.Rule, 0, len(request.GroupingRule.Rules))
-	for _, rule := range request.GroupingRule.Rules {
-		if rule.Multi == nil {
-			return group.CreateInput{}, invalidGroupRequest("rule multi is required")
-		}
-		rules = append(rules, group.Rule{
-			AttributeKey: rule.AttributeKey,
-			Operator:     group.Operator(rule.Operator),
-			Multi:        *rule.Multi,
-			Value:        rule.Value,
-		})
+	rules, err := newDomainRules(request.GroupingRule.Rules)
+	if err != nil {
+		return group.CreateInput{}, err
 	}
 	members := make([]group.IndividualMember, 0, len(request.IndividualMembers))
 	for _, member := range request.IndividualMembers {
@@ -72,6 +69,44 @@ func (request GroupCreateRequest) ToDomain(workspaceID string) (group.CreateInpu
 		GroupingRule:      group.GroupingRule{Rules: rules, ExpirationDate: request.GroupingRule.ExpirationDate.Time},
 		IndividualMembers: members,
 	}, nil
+}
+
+func DecodeGroupGroupingRulesRequest(body io.Reader) (GroupGroupingRulesRequest, error) {
+	var request GroupGroupingRulesRequest
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(&request); err != nil {
+		return GroupGroupingRulesRequest{}, fmt.Errorf("decode group grouping rules request: %w", err)
+	}
+	return request, nil
+}
+
+func (request GroupGroupingRulesRequest) ToDomain(workspaceID string, groupID string) (group.UpdateGroupingRuleInput, error) {
+	rules, err := newDomainRules(request.Rules)
+	if err != nil {
+		return group.UpdateGroupingRuleInput{}, err
+	}
+	return group.UpdateGroupingRuleInput{
+		WorkspaceID:    workspaceID,
+		GroupID:        groupID,
+		Rules:          rules,
+		ExpirationDate: request.ExpirationDate.Time,
+	}, nil
+}
+
+func newDomainRules(input []RuleRequest) ([]group.Rule, error) {
+	rules := make([]group.Rule, 0, len(input))
+	for _, rule := range input {
+		if rule.Multi == nil {
+			return nil, invalidGroupRequest("rule multi is required")
+		}
+		rules = append(rules, group.Rule{
+			AttributeKey: rule.AttributeKey,
+			Operator:     group.Operator(rule.Operator),
+			Multi:        *rule.Multi,
+			Value:        rule.Value,
+		})
+	}
+	return rules, nil
 }
 
 func invalidGroupRequest(message string) error {

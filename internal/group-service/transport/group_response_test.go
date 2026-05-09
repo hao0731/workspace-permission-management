@@ -62,3 +62,65 @@ func TestNewGroupCreateResponse(t *testing.T) {
 		t.Fatalf("name = %v, want Design Reviewers", groupBody["name"])
 	}
 }
+
+func TestNewGroupGetResponseFound(t *testing.T) {
+	expiration := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	model := group.Group{
+		ID:          "group-1",
+		WorkspaceID: "workspace-1",
+		Name:        "Design Reviewers",
+		Description: "Employees who can review design documents.",
+		GroupingRule: group.GroupingRule{
+			Rules: []group.Rule{{
+				AttributeKey: "department",
+				Operator:     group.OperatorEq,
+				Multi:        false,
+				Value:        "ABCD-123",
+			}},
+			ExpirationDate: expiration,
+		},
+	}
+
+	response := NewGroupGetResponse(&model)
+	if response.Group == nil {
+		t.Fatal("Group = nil, want group")
+	}
+	if response.Group.ID != "group-1" {
+		t.Fatalf("ID = %q, want group-1", response.Group.ID)
+	}
+}
+
+func TestNewGroupGetResponseMissing(t *testing.T) {
+	response := NewGroupGetResponse(nil)
+	if response.Group != nil {
+		t.Fatalf("Group = %+v, want nil", response.Group)
+	}
+}
+
+func TestNewIndividualMemberListResponse(t *testing.T) {
+	expiration := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	page := group.IndividualMemberPage{
+		Members: []group.IndividualMember{{
+			ID:             "member-1",
+			GroupID:        "group-1",
+			NTAccount:      "user1",
+			ExpirationDate: expiration,
+		}},
+		HasNextPage: true,
+		NextCursor: &group.IndividualMemberCursor{
+			CreatedAt: time.Date(2026, 5, 9, 7, 31, 0, 0, time.UTC),
+			ID:        "member-1",
+		},
+	}
+
+	response, err := NewIndividualMemberListResponse(page)
+	if err != nil {
+		t.Fatalf("response error = %v, want nil", err)
+	}
+	if len(response.Members) != 1 || response.Members[0].NTAccount != "user1" {
+		t.Fatalf("Members = %+v, want user1", response.Members)
+	}
+	if !response.PageInfo.HasNextPage || response.PageInfo.NextToken == "" {
+		t.Fatalf("PageInfo = %+v, want next page token", response.PageInfo)
+	}
+}

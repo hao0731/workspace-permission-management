@@ -42,6 +42,23 @@ type CreateInput struct {
 	IndividualMembers []IndividualMember
 }
 
+type GetQuery struct {
+	WorkspaceID string
+	GroupID     string
+}
+
+type DeleteInput struct {
+	WorkspaceID string
+	GroupID     string
+}
+
+type UpdateGroupingRuleInput struct {
+	WorkspaceID    string
+	GroupID        string
+	Rules          []Rule
+	ExpirationDate time.Time
+}
+
 type GroupingRule struct {
 	Rules          []Rule
 	ExpirationDate time.Time
@@ -62,6 +79,24 @@ type IndividualMember struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      *time.Time
+}
+
+type IndividualMemberCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+type ListIndividualMembersQuery struct {
+	WorkspaceID string
+	GroupID     string
+	Limit       int
+	Cursor      *IndividualMemberCursor
+}
+
+type IndividualMemberPage struct {
+	Members     []IndividualMember
+	HasNextPage bool
+	NextCursor  *IndividualMemberCursor
 }
 
 type ValidateOption interface {
@@ -118,6 +153,27 @@ func (input CreateInput) Normalize() CreateInput {
 	return input
 }
 
+func (query GetQuery) Normalize() GetQuery {
+	query.WorkspaceID = strings.TrimSpace(query.WorkspaceID)
+	query.GroupID = strings.TrimSpace(query.GroupID)
+	return query
+}
+
+func (input DeleteInput) Normalize() DeleteInput {
+	input.WorkspaceID = strings.TrimSpace(input.WorkspaceID)
+	input.GroupID = strings.TrimSpace(input.GroupID)
+	return input
+}
+
+func (input UpdateGroupingRuleInput) Normalize() UpdateGroupingRuleInput {
+	input.WorkspaceID = strings.TrimSpace(input.WorkspaceID)
+	input.GroupID = strings.TrimSpace(input.GroupID)
+	for i := range input.Rules {
+		input.Rules[i] = input.Rules[i].Normalize()
+	}
+	return input
+}
+
 func (rule GroupingRule) Normalize() GroupingRule {
 	for i := range rule.Rules {
 		rule.Rules[i] = rule.Rules[i].Normalize()
@@ -133,4 +189,13 @@ func (rule Rule) Normalize() Rule {
 func (member IndividualMember) Normalize() IndividualMember {
 	member.NTAccount = strings.TrimSpace(member.NTAccount)
 	return member
+}
+
+func (query ListIndividualMembersQuery) Normalize() ListIndividualMembersQuery {
+	query.WorkspaceID = strings.TrimSpace(query.WorkspaceID)
+	query.GroupID = strings.TrimSpace(query.GroupID)
+	if query.Cursor != nil {
+		query.Cursor.ID = strings.TrimSpace(query.Cursor.ID)
+	}
+	return query
 }
