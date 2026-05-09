@@ -30,6 +30,16 @@ func (input SaveInput) Validate() error {
 	return nil
 }
 
+func (query GetQuery) Validate() error {
+	if strings.TrimSpace(query.WorkspaceID) == "" {
+		return invalidInput("workspace id is required")
+	}
+	if strings.TrimSpace(query.FunctionKey) == "" {
+		return invalidInput("function key is required")
+	}
+	return nil
+}
+
 func validateSection(label string, section PermissionSection) error {
 	if strings.TrimSpace(section.BaselineRule.ActionID) == "" {
 		return invalidInput(fmt.Sprintf("%s baseline action id is required", label))

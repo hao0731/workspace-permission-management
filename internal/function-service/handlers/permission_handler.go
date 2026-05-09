@@ -14,6 +14,7 @@ import (
 
 type HTTPPermissionService interface {
 	SavePermission(ctx context.Context, input permission.SaveInput) (permission.Permission, error)
+	GetPermission(ctx context.Context, query permission.GetQuery) (permission.Permission, bool, error)
 }
 
 type PermissionHandler struct {
@@ -32,6 +33,7 @@ func NewPermissionHandler(service HTTPPermissionService, logger *slog.Logger) *P
 
 func RegisterPermissionRoutes(e *echo.Echo, handler *PermissionHandler) {
 	e.PUT("/api/v1/workspaces/:workspace_id/functions/:function_key/permissions", handler.SavePermissions)
+	e.GET("/api/v1/workspaces/:workspace_id/functions/:function_key/permissions", handler.GetPermissions)
 }
 
 func newPermissionPathParams(c *echo.Context) permissionPathParams {
@@ -70,4 +72,27 @@ func (h *PermissionHandler) SavePermissions(c *echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, transport.NewPermissionSaveResponse(model))
+}
+
+func (h *PermissionHandler) GetPermissions(c *echo.Context) error {
+	params := newPermissionPathParams(c)
+	model, found, err := h.service.GetPermission(c.Request().Context(), permission.GetQuery{
+		WorkspaceID: params.workspaceID,
+		FunctionKey: params.functionKey,
+	})
+	if err != nil {
+		if errors.Is(err, permission.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to get permissions",
+			"err", err,
+			"workspace_id", params.workspaceID,
+			"function_key", params.functionKey,
+		)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	if !found {
+		return c.JSON(http.StatusOK, transport.NewPermissionGetNotFoundResponse())
+	}
+	return c.JSON(http.StatusOK, transport.NewPermissionGetResponse(model))
 }

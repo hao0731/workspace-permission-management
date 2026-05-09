@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,6 +22,8 @@ type permissionDocument struct {
 	ID               string                    `bson:"_id"`
 	WorkspaceID      string                    `bson:"workspace_id"`
 	FunctionKey      string                    `bson:"function_key"`
+	CreatedAt        time.Time                 `bson:"created_at"`
+	UpdatedAt        time.Time                 `bson:"updated_at"`
 	OfficePermission permissionSectionDocument `bson:"office_permission"`
 	RemotePermission permissionSectionDocument `bson:"remote_permission"`
 }
@@ -76,6 +79,14 @@ func (r *MongoPermissionRepository) Save(ctx context.Context, input permission.P
 	return doc.toDomain(), nil
 }
 
+func (r *MongoPermissionRepository) Get(ctx context.Context, query permission.GetQuery) (permission.Permission, bool, error) {
+	model, found, err := r.findOptionalByWorkspaceFunction(ctx, query.WorkspaceID, query.FunctionKey)
+	if err != nil {
+		return permission.Permission{}, false, err
+	}
+	return model, found, nil
+}
+
 func (r *MongoPermissionRepository) retryPermissionUpdate(ctx context.Context, doc permissionDocument) (permission.Permission, error) {
 	result, err := r.collection.UpdateOne(ctx, buildPermissionFilter(doc.WorkspaceID, doc.FunctionKey), buildPermissionUpdate(doc))
 	if err != nil {
@@ -88,11 +99,25 @@ func (r *MongoPermissionRepository) retryPermissionUpdate(ctx context.Context, d
 }
 
 func (r *MongoPermissionRepository) findByWorkspaceFunction(ctx context.Context, workspaceID, functionKey string) (permission.Permission, error) {
+	model, found, err := r.findOptionalByWorkspaceFunction(ctx, workspaceID, functionKey)
+	if err != nil {
+		return permission.Permission{}, err
+	}
+	if !found {
+		return permission.Permission{}, fmt.Errorf("find permissions: document not found")
+	}
+	return model, nil
+}
+
+func (r *MongoPermissionRepository) findOptionalByWorkspaceFunction(ctx context.Context, workspaceID, functionKey string) (permission.Permission, bool, error) {
 	var doc permissionDocument
 	if err := r.collection.FindOne(ctx, buildPermissionFilter(workspaceID, functionKey)).Decode(&doc); err != nil {
-		return permission.Permission{}, fmt.Errorf("find permissions: %w", err)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return permission.Permission{}, false, nil
+		}
+		return permission.Permission{}, false, fmt.Errorf("find permissions: %w", err)
 	}
-	return doc.toDomain(), nil
+	return doc.toDomain(), true, nil
 }
 
 func permissionUniqueIndexModel() mongo.IndexModel {
@@ -112,11 +137,17 @@ func buildPermissionFilter(workspaceID, functionKey string) bson.M {
 	}
 }
 
-func buildPermissionUpdate(doc permissionDocument) bson.M {
-	return bson.M{
-		"$set": bson.M{
-			"office_permission": doc.OfficePermission,
-			"remote_permission": doc.RemotePermission,
+func buildPermissionUpdate(doc permissionDocument) mongo.Pipeline {
+	return mongo.Pipeline{
+		bson.D{
+			{Key: "$set", Value: bson.D{
+				{Key: "office_permission", Value: doc.OfficePermission},
+				{Key: "remote_permission", Value: doc.RemotePermission},
+				{Key: "updated_at", Value: doc.UpdatedAt},
+				{Key: "created_at", Value: bson.D{
+					{Key: "$ifNull", Value: bson.A{"$created_at", doc.CreatedAt}},
+				}},
+			}},
 		},
 	}
 }
@@ -126,6 +157,8 @@ func newPermissionDocument(model permission.Permission) permissionDocument {
 		ID:               model.ID,
 		WorkspaceID:      model.WorkspaceID,
 		FunctionKey:      model.FunctionKey,
+		CreatedAt:        model.CreatedAt,
+		UpdatedAt:        model.UpdatedAt,
 		OfficePermission: newPermissionSectionDocument(model.OfficePermission),
 		RemotePermission: newPermissionSectionDocument(model.RemotePermission),
 	}
@@ -157,6 +190,8 @@ func (d permissionDocument) toDomain() permission.Permission {
 		ID:               d.ID,
 		WorkspaceID:      d.WorkspaceID,
 		FunctionKey:      d.FunctionKey,
+		CreatedAt:        d.CreatedAt,
+		UpdatedAt:        d.UpdatedAt,
 		OfficePermission: d.OfficePermission.toDomain(),
 		RemotePermission: d.RemotePermission.toDomain(),
 	}

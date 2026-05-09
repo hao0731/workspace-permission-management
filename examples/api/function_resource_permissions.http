@@ -135,3 +135,10 @@ Content-Type: application/json
     "extra_rules": []
   }
 }
+
+### Get saved permissions
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{functionKey}}/permissions
+
+### Get permissions when no permission document exists; response is 200 with {"permissions": null}
+@missingFunctionKey = no-permissions-yet
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/functions/{{missingFunctionKey}}/permissions

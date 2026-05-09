@@ -10,6 +10,10 @@ type PermissionSaveResponse struct {
 	Permissions PermissionResponse `json:"permissions"`
 }
 
+type PermissionGetResponse struct {
+	Permissions *PermissionResponse `json:"permissions"`
+}
+
 type PermissionResponse struct {
 	OfficePermission PermissionSectionResponse `json:"office_permission"`
 	RemotePermission PermissionSectionResponse `json:"remote_permission"`
@@ -36,10 +40,25 @@ type ExtraRuleResponse struct {
 
 func NewPermissionSaveResponse(model permission.Permission) PermissionSaveResponse {
 	return PermissionSaveResponse{
-		Permissions: PermissionResponse{
-			OfficePermission: permissionSectionResponse(model.OfficePermission),
-			RemotePermission: permissionSectionResponse(model.RemotePermission),
-		},
+		Permissions: newPermissionResponse(model),
+	}
+}
+
+func NewPermissionGetResponse(model permission.Permission) PermissionGetResponse {
+	permissions := newPermissionResponse(model)
+	return PermissionGetResponse{
+		Permissions: &permissions,
+	}
+}
+
+func NewPermissionGetNotFoundResponse() PermissionGetResponse {
+	return PermissionGetResponse{}
+}
+
+func newPermissionResponse(model permission.Permission) PermissionResponse {
+	return PermissionResponse{
+		OfficePermission: permissionSectionResponse(model.OfficePermission),
+		RemotePermission: permissionSectionResponse(model.RemotePermission),
 	}
 }
 

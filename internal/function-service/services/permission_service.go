@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -13,6 +14,7 @@ import (
 
 type PermissionRepository interface {
 	Save(ctx context.Context, input permission.Permission) (permission.Permission, error)
+	Get(ctx context.Context, query permission.GetQuery) (permission.Permission, bool, error)
 }
 
 type PermissionOption func(*PermissionService)
@@ -25,15 +27,27 @@ func WithPermissionIDGenerator(generator func() string) PermissionOption {
 	}
 }
 
+func WithPermissionClock(clock func() time.Time) PermissionOption {
+	return func(s *PermissionService) {
+		if clock != nil {
+			s.now = clock
+		}
+	}
+}
+
 type PermissionService struct {
 	repository  PermissionRepository
 	idGenerator func() string
+	now         func() time.Time
 }
 
 func NewPermissionService(repository PermissionRepository, opts ...PermissionOption) *PermissionService {
 	service := &PermissionService{
 		repository:  repository,
 		idGenerator: uuid.NewString,
+		now: func() time.Time {
+			return time.Now().UTC()
+		},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -48,10 +62,13 @@ func (s *PermissionService) SavePermission(ctx context.Context, input permission
 		return permission.Permission{}, err
 	}
 
+	now := s.now()
 	model := permission.Permission{
 		ID:               s.idGenerator(),
 		WorkspaceID:      input.WorkspaceID,
 		FunctionKey:      input.FunctionKey,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 		OfficePermission: s.normalizeSection(*input.OfficePermission),
 		RemotePermission: s.normalizeSection(*input.RemotePermission),
 	}
@@ -63,6 +80,18 @@ func (s *PermissionService) SavePermission(ctx context.Context, input permission
 		return permission.Permission{}, fmt.Errorf("save permissions: %w", err)
 	}
 	return saved, nil
+}
+
+func (s *PermissionService) GetPermission(ctx context.Context, query permission.GetQuery) (permission.Permission, bool, error) {
+	if err := query.Validate(); err != nil {
+		return permission.Permission{}, false, err
+	}
+
+	model, found, err := s.repository.Get(ctx, query)
+	if err != nil {
+		return permission.Permission{}, false, fmt.Errorf("get permissions: %w", err)
+	}
+	return model, found, nil
 }
 
 func (s *PermissionService) normalizeSection(section permission.PermissionSection) permission.PermissionSection {
