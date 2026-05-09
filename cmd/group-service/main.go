@@ -15,6 +15,7 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/group-service/services"
 	"github.com/hao0731/workspace-permission-management/internal/shared/health"
 	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -73,7 +74,7 @@ func run() error {
 
 	e := echo.New()
 	registerHealthRoutes(e)
-	handlers.RegisterRoutes(e, handlers.NewGroupHandler(groupService, logger))
+	handlers.RegisterRoutes(e, handlers.NewGroupHandler(groupService, logger, pagination.New()))
 
 	errCh := make(chan error, 1)
 	go func() {

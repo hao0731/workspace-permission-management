@@ -111,3 +111,58 @@ Content-Type: application/json
   },
   "individual_members": []
 }
+
+@groupId = 0d5c4f7e-7675-4c90-b495-93655c2d3c40
+@nextToken = replace-with-token-from-previous-response
+
+### Get group
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}
+
+### Get missing group returns group null
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/missing-group
+
+### Delete group idempotently
+DELETE {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}
+
+### Replace grouping rules
+PUT {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/grouping-rules
+Content-Type: application/json
+
+{
+  "rules": [
+    {
+      "attribute_key": "department",
+      "operator": "eq",
+      "multi": false,
+      "value": "ABCD-123"
+    },
+    {
+      "attribute_key": "level",
+      "operator": "gte",
+      "multi": false,
+      "value": 5
+    }
+  ],
+  "expiration_date": "2026-06-01T00:00:00Z"
+}
+
+### Replace grouping rules on missing group returns 404
+PUT {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/missing-group/grouping-rules
+Content-Type: application/json
+
+{
+  "rules": [],
+  "expiration_date": "2026-06-01T00:00:00Z"
+}
+
+### List individual members
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members?limit=20
+
+### List individual members with cursor
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members?limit=20&next_token={{nextToken}}
+
+### Invalid individual member list limit returns 400
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members?limit=51
+
+### Invalid individual member next token returns 400
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members?next_token=not-base64
