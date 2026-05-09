@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/group"
 	"github.com/hao0731/workspace-permission-management/internal/group-service/config"
 	"github.com/hao0731/workspace-permission-management/internal/group-service/handlers"
 	"github.com/hao0731/workspace-permission-management/internal/group-service/repositories"
@@ -67,10 +66,10 @@ func run() error {
 		return ensureIndexErr
 	}
 
-	groupService := services.NewGroupService(repository, services.WithGroupValidationLimits(group.ValidationLimits{
-		MaxIndividualMembers: cfg.Validation.MaxIndividualMembers,
-		MaxGroupingRules:     cfg.Validation.MaxGroupingRules,
-	}))
+	groupService := services.NewGroupService(repository, services.WithGroupValidationLimits(
+		cfg.Validation.MaxIndividualMembers,
+		cfg.Validation.MaxGroupingRules,
+	))
 
 	e := echo.New()
 	registerHealthRoutes(e)

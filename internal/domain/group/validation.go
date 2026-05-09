@@ -7,12 +7,14 @@ import (
 	"time"
 )
 
-func (input CreateInput) Validate(now time.Time) error {
-	return input.ValidateWithLimits(now, DefaultValidationLimits())
-}
-
-func (input CreateInput) ValidateWithLimits(now time.Time, limits ValidationLimits) error {
-	limits = limits.WithDefaults()
+func (input CreateInput) Validate(now time.Time, opts ...ValidateOption) error {
+	options := defaultValidateOptions()
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyValidateOption(&options)
+		}
+	}
+	options = options.withDefaults()
 	if strings.TrimSpace(input.WorkspaceID) == "" {
 		return invalidInput("workspace id is required")
 	}
@@ -28,11 +30,11 @@ func (input CreateInput) ValidateWithLimits(now time.Time, limits ValidationLimi
 	if len(input.GroupingRule.Rules) == 0 && len(input.IndividualMembers) == 0 {
 		return invalidInput("at least one membership source is required")
 	}
-	if len(input.GroupingRule.Rules) > limits.MaxGroupingRules {
-		return invalidInput(fmt.Sprintf("grouping rules must not exceed %d items", limits.MaxGroupingRules))
+	if len(input.GroupingRule.Rules) > options.maxGroupingRules {
+		return invalidInput(fmt.Sprintf("grouping rules must not exceed %d items", options.maxGroupingRules))
 	}
-	if len(input.IndividualMembers) > limits.MaxIndividualMembers {
-		return invalidInput(fmt.Sprintf("individual members must not exceed %d items", limits.MaxIndividualMembers))
+	if len(input.IndividualMembers) > options.maxIndividualMembers {
+		return invalidInput(fmt.Sprintf("individual members must not exceed %d items", options.maxIndividualMembers))
 	}
 	for _, rule := range input.GroupingRule.Rules {
 		if err := rule.Validate(); err != nil {

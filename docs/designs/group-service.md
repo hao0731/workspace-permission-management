@@ -248,7 +248,7 @@ Domain or service validation should reject:
 - Duplicate `individual_members[].nt_account` values in one request after trimming.
 - `individual_members[].expiration_date` values that are not later than the service's request processing time.
 
-The implementation should inject the clock and validation limits at the service boundary so expiration-date and maximum-count validation are deterministic in tests. Limit values come from service configuration, but validation itself remains in the domain layer so non-HTTP callers cannot bypass the same invariants.
+The implementation should inject the clock and validation limit options at the service boundary so expiration-date and maximum-count validation are deterministic in tests. Limit values come from service configuration, but validation itself remains in the domain layer so non-HTTP callers cannot bypass the same invariants.
 
 ## Error Handling
 
@@ -284,7 +284,7 @@ Primary types:
 - `GroupingRule`: `rules` plus expiration date.
 - `Rule`: employee attribute predicate.
 - `IndividualMember`: explicit user membership with expiration date.
-- `ValidationLimits`: maximum allowed `grouping_rule.rules` and `individual_members` counts supplied by the service configuration.
+- `CreateInput.Validate(now, options...)`: validates the create input with default count limits, optionally overridden through `WithMaxIndividualMembers` and `WithMaxGroupingRules`.
 
 The domain should expose stable errors such as:
 

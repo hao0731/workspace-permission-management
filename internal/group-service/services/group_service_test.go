@@ -112,16 +112,15 @@ func TestGroupServiceCreateGroupValidationFailureDoesNotCallRepository(t *testin
 
 func TestGroupServiceCreateGroupConfiguredLimitFailureDoesNotCallRepository(t *testing.T) {
 	tests := []struct {
-		name   string
-		limits group.ValidationLimits
-		mutate func(*group.CreateInput)
+		name                 string
+		maxGroupingRules     int
+		maxIndividualMembers int
+		mutate               func(*group.CreateInput)
 	}{
 		{
-			name: "too many grouping rules",
-			limits: group.ValidationLimits{
-				MaxGroupingRules:     1,
-				MaxIndividualMembers: 1000,
-			},
+			name:                 "too many grouping rules",
+			maxGroupingRules:     1,
+			maxIndividualMembers: 1000,
 			mutate: func(input *group.CreateInput) {
 				input.GroupingRule.Rules = []group.Rule{
 					{
@@ -140,11 +139,9 @@ func TestGroupServiceCreateGroupConfiguredLimitFailureDoesNotCallRepository(t *t
 			},
 		},
 		{
-			name: "too many individual members",
-			limits: group.ValidationLimits{
-				MaxGroupingRules:     10,
-				MaxIndividualMembers: 1,
-			},
+			name:                 "too many individual members",
+			maxGroupingRules:     10,
+			maxIndividualMembers: 1,
 			mutate: func(input *group.CreateInput) {
 				input.IndividualMembers = []group.IndividualMember{
 					{NTAccount: "user1", ExpirationDate: serviceFutureTime()},
@@ -159,7 +156,7 @@ func TestGroupServiceCreateGroupConfiguredLimitFailureDoesNotCallRepository(t *t
 			repository := &fakeGroupRepository{}
 			service := NewGroupService(repository,
 				WithGroupClock(fixedNow),
-				WithGroupValidationLimits(tt.limits),
+				WithGroupValidationLimits(tt.maxIndividualMembers, tt.maxGroupingRules),
 			)
 			input := validServiceCreateInput()
 			tt.mutate(&input)

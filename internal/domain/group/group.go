@@ -64,26 +64,48 @@ type IndividualMember struct {
 	DeletedAt      *time.Time
 }
 
-type ValidationLimits struct {
-	MaxIndividualMembers int
-	MaxGroupingRules     int
+type ValidateOption interface {
+	applyValidateOption(*validateOptions)
 }
 
-func DefaultValidationLimits() ValidationLimits {
-	return ValidationLimits{
-		MaxIndividualMembers: DefaultMaxIndividualMembers,
-		MaxGroupingRules:     DefaultMaxGroupingRules,
+type validateOptionFunc func(*validateOptions)
+
+type validateOptions struct {
+	maxIndividualMembers int
+	maxGroupingRules     int
+}
+
+func (fn validateOptionFunc) applyValidateOption(options *validateOptions) {
+	fn(options)
+}
+
+func WithMaxIndividualMembers(max int) ValidateOption {
+	return validateOptionFunc(func(options *validateOptions) {
+		options.maxIndividualMembers = max
+	})
+}
+
+func WithMaxGroupingRules(max int) ValidateOption {
+	return validateOptionFunc(func(options *validateOptions) {
+		options.maxGroupingRules = max
+	})
+}
+
+func defaultValidateOptions() validateOptions {
+	return validateOptions{
+		maxIndividualMembers: DefaultMaxIndividualMembers,
+		maxGroupingRules:     DefaultMaxGroupingRules,
 	}
 }
 
-func (limits ValidationLimits) WithDefaults() ValidationLimits {
-	if limits.MaxIndividualMembers <= 0 {
-		limits.MaxIndividualMembers = DefaultMaxIndividualMembers
+func (options validateOptions) withDefaults() validateOptions {
+	if options.maxIndividualMembers <= 0 {
+		options.maxIndividualMembers = DefaultMaxIndividualMembers
 	}
-	if limits.MaxGroupingRules <= 0 {
-		limits.MaxGroupingRules = DefaultMaxGroupingRules
+	if options.maxGroupingRules <= 0 {
+		options.maxGroupingRules = DefaultMaxGroupingRules
 	}
-	return limits
+	return options
 }
 
 func (input CreateInput) Normalize() CreateInput {

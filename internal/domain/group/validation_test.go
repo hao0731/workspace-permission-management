@@ -55,19 +55,18 @@ func requireInvalidInput(t *testing.T, err error, wantMessage string) {
 	}
 }
 
-func TestCreateInputValidateWithLimitsRejectsLimitExceeded(t *testing.T) {
+func TestCreateInputValidateRejectsLimitExceededWithOptions(t *testing.T) {
 	tests := []struct {
-		name        string
-		limits      ValidationLimits
-		mutate      func(*CreateInput)
-		wantMessage string
+		name                 string
+		maxGroupingRules     int
+		maxIndividualMembers int
+		mutate               func(*CreateInput)
+		wantMessage          string
 	}{
 		{
-			name: "too many grouping rules",
-			limits: ValidationLimits{
-				MaxGroupingRules:     1,
-				MaxIndividualMembers: 1000,
-			},
+			name:                 "too many grouping rules",
+			maxGroupingRules:     1,
+			maxIndividualMembers: 1000,
 			mutate: func(input *CreateInput) {
 				input.GroupingRule.Rules = []Rule{
 					validRule("department"),
@@ -77,11 +76,9 @@ func TestCreateInputValidateWithLimitsRejectsLimitExceeded(t *testing.T) {
 			wantMessage: "grouping rules must not exceed 1 items",
 		},
 		{
-			name: "too many individual members",
-			limits: ValidationLimits{
-				MaxGroupingRules:     10,
-				MaxIndividualMembers: 1,
-			},
+			name:                 "too many individual members",
+			maxGroupingRules:     10,
+			maxIndividualMembers: 1,
 			mutate: func(input *CreateInput) {
 				input.IndividualMembers = []IndividualMember{
 					{NTAccount: "user1", ExpirationDate: futureTime()},
@@ -97,7 +94,11 @@ func TestCreateInputValidateWithLimitsRejectsLimitExceeded(t *testing.T) {
 			input := validCreateInput().Normalize()
 			tt.mutate(&input)
 
-			err := input.ValidateWithLimits(validationNow(), tt.limits)
+			err := input.Validate(
+				validationNow(),
+				WithMaxGroupingRules(tt.maxGroupingRules),
+				WithMaxIndividualMembers(tt.maxIndividualMembers),
+			)
 			requireInvalidInput(t, err, tt.wantMessage)
 		})
 	}
