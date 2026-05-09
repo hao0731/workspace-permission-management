@@ -325,3 +325,192 @@ func TestRuleValidateAcceptsAllowedOperators(t *testing.T) {
 		})
 	}
 }
+
+func TestGetQueryValidate(t *testing.T) {
+	query := GetQuery{WorkspaceID: "workspace-1", GroupID: "group-1"}
+	if err := query.Normalize().Validate(); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+}
+
+func TestGroupIdentityValidationRejectsBlankFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		validate    func() error
+		wantMessage string
+	}{
+		{
+			name: "get blank workspace",
+			validate: func() error {
+				return GetQuery{WorkspaceID: " ", GroupID: "group-1"}.Normalize().Validate()
+			},
+			wantMessage: "workspace id is required",
+		},
+		{
+			name: "get blank group id",
+			validate: func() error {
+				return GetQuery{WorkspaceID: "workspace-1", GroupID: " "}.Normalize().Validate()
+			},
+			wantMessage: "group id is required",
+		},
+		{
+			name: "delete blank group id",
+			validate: func() error {
+				return DeleteInput{WorkspaceID: "workspace-1", GroupID: " "}.Normalize().Validate()
+			},
+			wantMessage: "group id is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireInvalidInput(t, tt.validate(), tt.wantMessage)
+		})
+	}
+}
+
+func TestUpdateGroupingRuleInputValidate(t *testing.T) {
+	input := UpdateGroupingRuleInput{
+		WorkspaceID:    " workspace-1 ",
+		GroupID:        " group-1 ",
+		ExpirationDate: futureTime(),
+		Rules: []Rule{{
+			AttributeKey: " department ",
+			Operator:     OperatorEq,
+			Multi:        false,
+			Value:        "ABCD-123",
+		}},
+	}.Normalize()
+
+	if err := input.Validate(validationNow(), WithMaxGroupingRules(1)); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+	if input.WorkspaceID != "workspace-1" || input.GroupID != "group-1" {
+		t.Fatalf("identity = %q/%q, want trimmed values", input.WorkspaceID, input.GroupID)
+	}
+	if input.Rules[0].AttributeKey != "department" {
+		t.Fatalf("AttributeKey = %q, want department", input.Rules[0].AttributeKey)
+	}
+}
+
+func TestUpdateGroupingRuleInputAllowsEmptyRulesAtDomainBoundary(t *testing.T) {
+	input := UpdateGroupingRuleInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		ExpirationDate: futureTime(),
+		Rules:          nil,
+	}
+
+	if err := input.Validate(validationNow()); err != nil {
+		t.Fatalf("Validate error = %v, want nil because active member count is repository-backed", err)
+	}
+}
+
+func TestUpdateGroupingRuleInputRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       UpdateGroupingRuleInput
+		wantMessage string
+	}{
+		{
+			name:        "blank group id",
+			input:       UpdateGroupingRuleInput{WorkspaceID: "workspace-1", GroupID: " ", ExpirationDate: futureTime()},
+			wantMessage: "group id is required",
+		},
+		{
+			name:        "missing expiration",
+			input:       UpdateGroupingRuleInput{WorkspaceID: "workspace-1", GroupID: "group-1"},
+			wantMessage: "grouping rule expiration date is required",
+		},
+		{
+			name:        "past expiration",
+			input:       UpdateGroupingRuleInput{WorkspaceID: "workspace-1", GroupID: "group-1", ExpirationDate: validationNow()},
+			wantMessage: "grouping rule expiration date must be in the future",
+		},
+		{
+			name: "too many rules",
+			input: UpdateGroupingRuleInput{
+				WorkspaceID:    "workspace-1",
+				GroupID:        "group-1",
+				ExpirationDate: futureTime(),
+				Rules: []Rule{
+					{AttributeKey: "department", Operator: OperatorEq, Multi: false, Value: "ABCD-123"},
+					{AttributeKey: "level", Operator: OperatorGte, Multi: false, Value: 5},
+				},
+			},
+			wantMessage: "grouping rules must not exceed 1 items",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.input.Normalize().Validate(validationNow(), WithMaxGroupingRules(1))
+			requireInvalidInput(t, err, tt.wantMessage)
+		})
+	}
+}
+
+func TestListIndividualMembersQueryValidate(t *testing.T) {
+	query := ListIndividualMembersQuery{
+		WorkspaceID: " workspace-1 ",
+		GroupID:     " group-1 ",
+		Limit:       20,
+		Cursor: &IndividualMemberCursor{
+			CreatedAt: validationNow(),
+			ID:        " member-1 ",
+		},
+	}.Normalize()
+
+	if err := query.Validate(); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+	if query.WorkspaceID != "workspace-1" || query.GroupID != "group-1" || query.Cursor.ID != "member-1" {
+		t.Fatalf("query = %+v, want trimmed identity and cursor", query)
+	}
+}
+
+func TestListIndividualMembersQueryRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       ListIndividualMembersQuery
+		wantMessage string
+	}{
+		{
+			name:        "blank group id",
+			query:       ListIndividualMembersQuery{WorkspaceID: "workspace-1", GroupID: " ", Limit: 20},
+			wantMessage: "group id is required",
+		},
+		{
+			name:        "zero limit",
+			query:       ListIndividualMembersQuery{WorkspaceID: "workspace-1", GroupID: "group-1"},
+			wantMessage: "limit must be greater than zero",
+		},
+		{
+			name: "cursor missing created at",
+			query: ListIndividualMembersQuery{
+				WorkspaceID: "workspace-1",
+				GroupID:     "group-1",
+				Limit:       20,
+				Cursor:      &IndividualMemberCursor{ID: "member-1"},
+			},
+			wantMessage: "cursor created_at is required",
+		},
+		{
+			name: "cursor missing id",
+			query: ListIndividualMembersQuery{
+				WorkspaceID: "workspace-1",
+				GroupID:     "group-1",
+				Limit:       20,
+				Cursor:      &IndividualMemberCursor{CreatedAt: validationNow()},
+			},
+			wantMessage: "cursor id is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.query.Normalize().Validate()
+			requireInvalidInput(t, err, tt.wantMessage)
+		})
+	}
+}

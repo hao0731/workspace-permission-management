@@ -44,6 +44,60 @@ func (input CreateInput) Validate(now time.Time, opts ...ValidateOption) error {
 	return validateIndividualMembers(input.IndividualMembers, now)
 }
 
+func (query GetQuery) Validate() error {
+	return validateGroupIdentity(query.WorkspaceID, query.GroupID)
+}
+
+func (input DeleteInput) Validate() error {
+	return validateGroupIdentity(input.WorkspaceID, input.GroupID)
+}
+
+func (input UpdateGroupingRuleInput) Validate(now time.Time, opts ...ValidateOption) error {
+	if err := validateGroupIdentity(input.WorkspaceID, input.GroupID); err != nil {
+		return err
+	}
+	options := defaultValidateOptions()
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyValidateOption(&options)
+		}
+	}
+	options = options.withDefaults()
+	if input.ExpirationDate.IsZero() {
+		return invalidInput("grouping rule expiration date is required")
+	}
+	if !input.ExpirationDate.After(now) {
+		return invalidInput("grouping rule expiration date must be in the future")
+	}
+	if len(input.Rules) > options.maxGroupingRules {
+		return invalidInput(fmt.Sprintf("grouping rules must not exceed %d items", options.maxGroupingRules))
+	}
+	for _, rule := range input.Rules {
+		if err := rule.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (query ListIndividualMembersQuery) Validate() error {
+	if err := validateGroupIdentity(query.WorkspaceID, query.GroupID); err != nil {
+		return err
+	}
+	if query.Limit <= 0 {
+		return invalidInput("limit must be greater than zero")
+	}
+	if query.Cursor != nil {
+		if query.Cursor.CreatedAt.IsZero() {
+			return invalidInput("cursor created_at is required")
+		}
+		if strings.TrimSpace(query.Cursor.ID) == "" {
+			return invalidInput("cursor id is required")
+		}
+	}
+	return nil
+}
+
 func (rule Rule) Validate() error {
 	if strings.TrimSpace(rule.AttributeKey) == "" {
 		return invalidInput("rule attribute key is required")
@@ -98,6 +152,16 @@ func validateIndividualMembers(members []IndividualMember, now time.Time) error 
 		if !member.ExpirationDate.After(now) {
 			return invalidInput("individual member expiration date must be in the future")
 		}
+	}
+	return nil
+}
+
+func validateGroupIdentity(workspaceID string, groupID string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return invalidInput("workspace id is required")
+	}
+	if strings.TrimSpace(groupID) == "" {
+		return invalidInput("group id is required")
 	}
 	return nil
 }
