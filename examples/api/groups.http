@@ -1,0 +1,113 @@
+@baseUrl = http://localhost:8081
+@workspaceId = workspace-1
+
+### Create group with grouping rules and individual members
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Design Reviewers",
+  "description": "Employees who can review design documents.",
+  "grouping_rule": {
+    "rules": [
+      {
+        "attribute_key": "department",
+        "operator": "eq",
+        "multi": false,
+        "value": "ABCD-123"
+      },
+      {
+        "attribute_key": "level",
+        "operator": "gte",
+        "multi": false,
+        "value": 5
+      }
+    ],
+    "expiration_date": "2026-06-01T00:00:00Z"
+  },
+  "individual_members": [
+    {
+      "nt_account": "user1",
+      "expiration_date": "2026-06-01T00:00:00Z"
+    }
+  ]
+}
+
+### Duplicate active group name in the same workspace returns 409
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Design Reviewers",
+  "description": "Duplicate name example.",
+  "grouping_rule": {
+    "rules": [
+      {
+        "attribute_key": "department",
+        "operator": "eq",
+        "multi": false,
+        "value": "ABCD-123"
+      }
+    ],
+    "expiration_date": "2026-06-01T00:00:00Z"
+  },
+  "individual_members": []
+}
+
+### Missing membership source returns 400
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Empty Group",
+  "description": "This request has no dynamic rules or individual members.",
+  "grouping_rule": {
+    "rules": [],
+    "expiration_date": "2026-06-01T00:00:00Z"
+  },
+  "individual_members": []
+}
+
+### Duplicate individual nt_account values return 400
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Duplicate Members",
+  "description": "This request repeats the same individual member.",
+  "grouping_rule": {
+    "rules": [],
+    "expiration_date": "2026-06-01T00:00:00Z"
+  },
+  "individual_members": [
+    {
+      "nt_account": "user1",
+      "expiration_date": "2026-06-01T00:00:00Z"
+    },
+    {
+      "nt_account": "user1",
+      "expiration_date": "2026-06-02T00:00:00Z"
+    }
+  ]
+}
+
+### Multi-value rule with empty array returns 400
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Invalid Rule",
+  "description": "This request has an invalid multi-value rule.",
+  "grouping_rule": {
+    "rules": [
+      {
+        "attribute_key": "department",
+        "operator": "eq",
+        "multi": true,
+        "value": []
+      }
+    ],
+    "expiration_date": "2026-06-01T00:00:00Z"
+  },
+  "individual_members": []
+}
