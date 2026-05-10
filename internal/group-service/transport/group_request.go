@@ -38,6 +38,14 @@ type GroupGroupingRulesRequest struct {
 	ExpirationDate JSONTime      `json:"expiration_date"`
 }
 
+type IndividualMembersAddRequest struct {
+	IndividualMembers []IndividualMemberRequest `json:"individual_members"`
+}
+
+type IndividualMemberExpirationUpdateRequest struct {
+	ExpirationDate JSONTime `json:"expiration_date"`
+}
+
 func DecodeGroupCreateRequest(body io.Reader) (GroupCreateRequest, error) {
 	var request GroupCreateRequest
 	decoder := json.NewDecoder(body)
@@ -78,6 +86,54 @@ func DecodeGroupGroupingRulesRequest(body io.Reader) (GroupGroupingRulesRequest,
 		return GroupGroupingRulesRequest{}, fmt.Errorf("decode group grouping rules request: %w", err)
 	}
 	return request, nil
+}
+
+func DecodeIndividualMembersAddRequest(body io.Reader) (IndividualMembersAddRequest, error) {
+	var request IndividualMembersAddRequest
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(&request); err != nil {
+		return IndividualMembersAddRequest{}, fmt.Errorf("decode individual members add request: %w", err)
+	}
+	return request, nil
+}
+
+func (request IndividualMembersAddRequest) ToDomain(workspaceID string, groupID string) (group.AddIndividualMembersInput, error) {
+	members := make([]group.IndividualMember, 0, len(request.IndividualMembers))
+	for _, member := range request.IndividualMembers {
+		if member.ExpirationDate.Time.IsZero() {
+			return group.AddIndividualMembersInput{}, invalidGroupRequest("individual member expiration_date is required")
+		}
+		members = append(members, group.IndividualMember{
+			NTAccount:      member.NTAccount,
+			ExpirationDate: member.ExpirationDate.Time,
+		})
+	}
+	return group.AddIndividualMembersInput{
+		WorkspaceID:       workspaceID,
+		GroupID:           groupID,
+		IndividualMembers: members,
+	}, nil
+}
+
+func DecodeIndividualMemberExpirationUpdateRequest(body io.Reader) (IndividualMemberExpirationUpdateRequest, error) {
+	var request IndividualMemberExpirationUpdateRequest
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(&request); err != nil {
+		return IndividualMemberExpirationUpdateRequest{}, fmt.Errorf("decode individual member expiration update request: %w", err)
+	}
+	return request, nil
+}
+
+func (request IndividualMemberExpirationUpdateRequest) ToDomain(workspaceID string, groupID string, ntAccount string) (group.UpdateIndividualMemberExpirationInput, error) {
+	if request.ExpirationDate.Time.IsZero() {
+		return group.UpdateIndividualMemberExpirationInput{}, invalidGroupRequest("expiration_date is required")
+	}
+	return group.UpdateIndividualMemberExpirationInput{
+		WorkspaceID:    workspaceID,
+		GroupID:        groupID,
+		NTAccount:      ntAccount,
+		ExpirationDate: request.ExpirationDate.Time,
+	}, nil
 }
 
 func (request GroupGroupingRulesRequest) ToDomain(workspaceID string, groupID string) (group.UpdateGroupingRuleInput, error) {
