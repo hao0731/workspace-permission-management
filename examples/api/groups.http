@@ -166,3 +166,64 @@ GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-
 
 ### Invalid individual member next token returns 400
 GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members?next_token=not-base64
+
+### Add individual members
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members
+Content-Type: application/json
+
+{
+  "individual_members": [
+    {
+      "nt_account": "user2",
+      "expiration_date": "2026-06-01T00:00:00Z"
+    }
+  ]
+}
+
+### Add duplicate individual member returns 409
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members
+Content-Type: application/json
+
+{
+  "individual_members": [
+    {
+      "nt_account": "user2",
+      "expiration_date": "2026-06-01T00:00:00Z"
+    }
+  ]
+}
+
+### Add individual member with invalid expiration returns 400
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members
+Content-Type: application/json
+
+{
+  "individual_members": [
+    {
+      "nt_account": "user3",
+      "expiration_date": "not-a-time"
+    }
+  ]
+}
+
+### Update individual member expiration
+PATCH {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members/user2
+Content-Type: application/json
+
+{
+  "expiration_date": "2026-07-01T00:00:00Z"
+}
+
+### Update missing individual member returns 404
+PATCH {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members/missing-user
+Content-Type: application/json
+
+{
+  "expiration_date": "2026-07-01T00:00:00Z"
+}
+
+### Delete individual member idempotently
+DELETE {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members/user2
+
+### Delete missing individual member idempotently
+DELETE {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/groups/{{groupId}}/individual-members/missing-user
