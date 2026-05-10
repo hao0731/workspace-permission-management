@@ -16,20 +16,27 @@ import (
 )
 
 type fakeHTTPGroupService struct {
-	input       group.CreateInput
-	getQuery    group.GetQuery
-	deleteInput group.DeleteInput
-	updateInput group.UpdateGroupingRuleInput
-	listQuery   group.ListIndividualMembersQuery
-	model       group.Group
-	groupPtr    *group.Group
-	page        group.IndividualMemberPage
-	err         error
-	calls       int
-	getCalls    int
-	deleteCalls int
-	updateCalls int
-	listCalls   int
+	input           group.CreateInput
+	getQuery        group.GetQuery
+	deleteInput     group.DeleteInput
+	updateInput     group.UpdateGroupingRuleInput
+	listQuery       group.ListIndividualMembersQuery
+	addMembersInput group.AddIndividualMembersInput
+	memberUpdate    group.UpdateIndividualMemberExpirationInput
+	memberDelete    group.DeleteIndividualMemberInput
+	model           group.Group
+	groupPtr        *group.Group
+	page            group.IndividualMemberPage
+	addedMembers    []group.IndividualMember
+	err             error
+	calls           int
+	getCalls        int
+	deleteCalls     int
+	updateCalls     int
+	listCalls       int
+	memberAddCalls  int
+	memberUpdCalls  int
+	memberDelCalls  int
 }
 
 func (f *fakeHTTPGroupService) CreateGroup(ctx context.Context, input group.CreateInput) (group.Group, error) {
@@ -69,6 +76,27 @@ func (f *fakeHTTPGroupService) ListIndividualMembers(ctx context.Context, query 
 		return group.IndividualMemberPage{}, f.err
 	}
 	return f.page, nil
+}
+
+func (f *fakeHTTPGroupService) AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error) {
+	f.memberAddCalls++
+	f.addMembersInput = input
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.addedMembers, nil
+}
+
+func (f *fakeHTTPGroupService) UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput) error {
+	f.memberUpdCalls++
+	f.memberUpdate = input
+	return f.err
+}
+
+func (f *fakeHTTPGroupService) DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput) error {
+	f.memberDelCalls++
+	f.memberDelete = input
+	return f.err
 }
 
 func validGroupRequestBody() string {
@@ -330,5 +358,131 @@ func TestGroupHandlerListIndividualMembers(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"members"`) {
 		t.Fatalf("body = %s, want members", rec.Body.String())
+	}
+}
+
+func TestGroupHandlerAddIndividualMembers(t *testing.T) {
+	expiration := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	service := &fakeHTTPGroupService{addedMembers: []group.IndividualMember{{ID: "member-2", GroupID: "group-1", NTAccount: "user2", ExpirationDate: expiration}}}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups/group-1/individual-members", strings.NewReader(`{
+		"individual_members": [{"nt_account": "user2", "expiration_date": "2026-06-01T00:00:00Z"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if service.memberAddCalls != 1 || service.addMembersInput.GroupID != "group-1" {
+		t.Fatalf("add input = %+v calls = %d, want group-1 and one call", service.addMembersInput, service.memberAddCalls)
+	}
+	if !strings.Contains(rec.Body.String(), `"members"`) {
+		t.Fatalf("body = %s, want members", rec.Body.String())
+	}
+}
+
+func TestGroupHandlerAddIndividualMembersDuplicateReturnsConflict(t *testing.T) {
+	service := &fakeHTTPGroupService{err: group.ErrDuplicateMember}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups/group-1/individual-members", strings.NewReader(`{
+		"individual_members": [{"nt_account": "user2", "expiration_date": "2026-06-01T00:00:00Z"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+}
+
+func TestGroupHandlerAddIndividualMembersMissingGroupReturnsNotFound(t *testing.T) {
+	service := &fakeHTTPGroupService{err: group.ErrNotFound}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/groups/missing/individual-members", strings.NewReader(`{
+		"individual_members": [{"nt_account": "user2", "expiration_date": "2026-06-01T00:00:00Z"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestGroupHandlerUpdateIndividualMemberExpiration(t *testing.T) {
+	service := &fakeHTTPGroupService{}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPatch, "/api/v1/workspaces/workspace-1/groups/group-1/individual-members/user2", strings.NewReader(`{
+		"expiration_date": "2026-07-01T00:00:00Z"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if service.memberUpdate.NTAccount != "user2" || service.memberUpdate.GroupID != "group-1" {
+		t.Fatalf("member update = %+v, want user2/group-1", service.memberUpdate)
+	}
+}
+
+func TestGroupHandlerUpdateIndividualMemberExpirationMissingReturnsNotFound(t *testing.T) {
+	service := &fakeHTTPGroupService{err: group.ErrNotFound}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPatch, "/api/v1/workspaces/workspace-1/groups/group-1/individual-members/missing", strings.NewReader(`{
+		"expiration_date": "2026-07-01T00:00:00Z"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestGroupHandlerDeleteIndividualMember(t *testing.T) {
+	service := &fakeHTTPGroupService{}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/groups/group-1/individual-members/user2", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if service.memberDelete.NTAccount != "user2" || service.memberDelete.GroupID != "group-1" {
+		t.Fatalf("member delete = %+v, want user2/group-1", service.memberDelete)
+	}
+}
+
+func TestGroupHandlerDeleteIndividualMemberMissingReturnsNoContent(t *testing.T) {
+	service := &fakeHTTPGroupService{}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/workspaces/workspace-1/groups/missing/individual-members/user2", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
 	}
 }

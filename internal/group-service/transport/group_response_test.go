@@ -124,3 +124,40 @@ func TestNewIndividualMemberListResponse(t *testing.T) {
 		t.Fatalf("PageInfo = %+v, want next page token", response.PageInfo)
 	}
 }
+
+func TestNewIndividualMembersAddResponse(t *testing.T) {
+	expiration := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	response := NewIndividualMembersAddResponse([]group.IndividualMember{{
+		ID:             "member-2",
+		GroupID:        "group-1",
+		NTAccount:      "user2",
+		ExpirationDate: expiration,
+		CreatedAt:      time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:      time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC),
+	}})
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("Marshal error = %v, want nil", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("Unmarshal error = %v, want nil", err)
+	}
+	members, ok := body["members"].([]any)
+	if !ok || len(members) != 1 {
+		t.Fatalf("members = %#v, want one member", body["members"])
+	}
+	member, ok := members[0].(map[string]any)
+	if !ok {
+		t.Fatalf("member = %#v, want object", members[0])
+	}
+	if member["nt_account"] != "user2" {
+		t.Fatalf("nt_account = %v, want user2", member["nt_account"])
+	}
+	for _, field := range []string{"id", "group_id", "created_at", "updated_at", "deleted_at"} {
+		if _, ok := member[field]; ok {
+			t.Fatalf("field %q is present in %#v, want omitted", field, member)
+		}
+	}
+}

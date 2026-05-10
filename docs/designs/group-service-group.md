@@ -4,7 +4,7 @@
 
 This document defines group-level APIs for `group-service`. It covers creating groups, reading one group, soft-deleting one group, and replacing the group's dynamic grouping rules.
 
-Entry point and shared service concerns are documented in [Group Service Design](group-service.md). Individual member reads and the member collection are documented in [Group Individual Members API Design](group-service-individual-members.md).
+Entry point and shared service concerns are documented in [Group Service Design](group-service.md). Individual member reads, mutations, and the member collection are documented in [Group Individual Members API Design](group-service-individual-members.md).
 
 ## Classification and Policies
 
@@ -43,7 +43,7 @@ Policy alignment:
 - Do not materialize or evaluate group membership from employee attributes.
 - Do not define an employee attribute catalog or type system.
 - Do not implement group list, group name update, description update, hard delete, restore, or history APIs.
-- Do not implement individual member add, replace, or delete APIs in this phase.
+- Individual member add, expiration update, and delete APIs are documented in [Group Individual Members API Design](group-service-individual-members.md).
 - Do not publish group-created, group-updated, group-deleted, or membership-changed events.
 - Do not implement NATS or JetStream integration for `group-service` in this phase.
 - Do not add frontend changes.

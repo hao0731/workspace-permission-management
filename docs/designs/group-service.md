@@ -7,7 +7,7 @@ The workspace permission management system uses groups as permission subjects. A
 This document is the entry point for `group-service`. Endpoint-family details are split into focused design documents:
 
 - [Group API Design](group-service-group.md): group create, read, soft delete, and grouping-rule replacement.
-- [Group Individual Members API Design](group-service-individual-members.md): individual member collection schema and paginated member reads.
+- [Group Individual Members API Design](group-service-individual-members.md): individual member collection schema, paginated member reads, and individual member mutations.
 
 Related context:
 
@@ -40,6 +40,7 @@ Policy alignment:
 - Persist explicit individual members in MongoDB collection `group_individual_members`.
 - Use soft deletion through `deleted_at` for both groups and individual members.
 - Keep create and delete operations that touch both collections atomic through MongoDB transactions.
+- Keep individual member add, expiration update, and delete workflows scoped to an active group and atomic through MongoDB transactions.
 - Keep validation, service workflows, persistence, and transport mapping aligned with repository boundaries.
 - Use `internal/shared/health` for liveness probing.
 - Use `internal/shared/pagination` for cursor-based member list parsing and token handling.
@@ -53,6 +54,9 @@ Policy alignment:
 | `DELETE /api/v1/workspaces/:workspace_id/groups/:group_id` | [Group API Design](group-service-group.md#delete-group-api) | `204 No Content` | `204 No Content` |
 | `PUT /api/v1/workspaces/:workspace_id/groups/:group_id/grouping-rules` | [Group API Design](group-service-group.md#replace-grouping-rules-api) | `204 No Content` | `404 Not Found` |
 | `GET /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members` | [Group Individual Members API Design](group-service-individual-members.md#list-individual-members-api) | `200 OK` with `members` and `page_info` | `200 OK` with an empty page |
+| `POST /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members` | [Group Individual Members API Design](group-service-individual-members.md#add-individual-members-api) | `201 Created` with added `members` | `404 Not Found` |
+| `PATCH /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account` | [Group Individual Members API Design](group-service-individual-members.md#update-individual-member-expiration-api) | `204 No Content` | `404 Not Found` |
+| `DELETE /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account` | [Group Individual Members API Design](group-service-individual-members.md#delete-individual-member-api) | `204 No Content` | `204 No Content` |
 
 Common API conventions:
 
@@ -124,11 +128,11 @@ Known errors should use this response shape:
 Common status mapping:
 
 - `400 Bad Request`: malformed JSON, invalid query parameters, invalid request shape, invalid field values, configured limit violations, or expiration dates that are not in the future.
-- `404 Not Found`: update operations whose active group target does not exist.
-- `409 Conflict`: active group name already exists in the same workspace during create.
+- `404 Not Found`: mutation operations whose required active group or active member target does not exist, except intentionally idempotent delete operations.
+- `409 Conflict`: active group name already exists in the same workspace during create, a member add request contains duplicate accounts, or an active individual member already exists in the same group during member add.
 - `500 Internal Server Error`: unexpected repository, transaction, or infrastructure failure.
 
-`DELETE /groups/:group_id` is intentionally idempotent and returns `204` even when the active group is already missing.
+`DELETE /groups/:group_id` and `DELETE /groups/:group_id/individual-members/:nt_account` are intentionally idempotent and return `204` even when the active target is already missing.
 
 ## Configuration
 
@@ -194,6 +198,8 @@ The implementation should keep `examples/api/groups.http` aligned with all group
 - Successful grouping-rule replacement.
 - Grouping-rule replacement validation where empty `rules` is rejected because no active individual members remain.
 - Paginated individual member list with `limit` and `next_token`.
+- Successful individual member add, expiration update, and idempotent delete.
+- Individual member add conflict and invalid expiration validation.
 
 ## Testing Strategy
 
@@ -218,6 +224,7 @@ Additional repository integration tests may require local MongoDB from Docker Co
 - Soft delete by `deleted_at`: preserves historical records and allows partial unique indexes for active records, at the cost of requiring every active query to include `deleted_at: null`.
 - Idempotent group delete: simplifies clients and retry behavior, but clients that need to know whether a group previously existed must call GET before DELETE.
 - Empty member list for missing group: avoids exposing group existence through a member-list error and matches cursor-list behavior, while GET group remains the canonical existence check.
+- Member mutation status split: add and expiration update return `404` when their required active group or member target is missing, while member delete is idempotent `204` for retry safety.
 
 ## Implementation Plan Notes
 

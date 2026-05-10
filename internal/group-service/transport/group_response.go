@@ -51,6 +51,10 @@ type IndividualMemberListResponse struct {
 	PageInfo PageInfoResponse           `json:"page_info"`
 }
 
+type IndividualMembersAddResponse struct {
+	Members []IndividualMemberResponse `json:"members"`
+}
+
 type PageInfoResponse struct {
 	HasNextPage bool   `json:"has_next_page"`
 	NextToken   string `json:"next_token"`
@@ -125,4 +129,15 @@ func NewIndividualMemberListResponse(page group.IndividualMemberPage) (Individua
 			NextToken:   nextToken,
 		},
 	}, nil
+}
+
+func NewIndividualMembersAddResponse(members []group.IndividualMember) IndividualMembersAddResponse {
+	responseMembers := make([]IndividualMemberResponse, 0, len(members))
+	for _, member := range members {
+		responseMembers = append(responseMembers, IndividualMemberResponse{
+			NTAccount:      member.NTAccount,
+			ExpirationDate: member.ExpirationDate,
+		})
+	}
+	return IndividualMembersAddResponse{Members: responseMembers}
 }

@@ -19,6 +19,9 @@ type HTTPGroupService interface {
 	DeleteGroup(ctx context.Context, input group.DeleteInput) error
 	UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput) error
 	ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error)
+	AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error)
+	UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput) error
+	DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput) error
 }
 
 type GroupHandler struct {
@@ -42,6 +45,9 @@ func RegisterRoutes(e *echo.Echo, handler *GroupHandler) {
 	e.DELETE("/api/v1/workspaces/:workspace_id/groups/:group_id", handler.DeleteGroup)
 	e.PUT("/api/v1/workspaces/:workspace_id/groups/:group_id/grouping-rules", handler.UpdateGroupingRule)
 	e.GET("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members", handler.ListIndividualMembers)
+	e.POST("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members", handler.AddIndividualMembers)
+	e.PATCH("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account", handler.UpdateIndividualMemberExpiration)
+	e.DELETE("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account", handler.DeleteIndividualMember)
 }
 
 func newGroupPathParams(c *echo.Context) groupPathParams {
@@ -166,6 +172,79 @@ func (h *GroupHandler) ListIndividualMembers(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	return c.JSON(http.StatusOK, response)
+}
+
+func (h *GroupHandler) AddIndividualMembers(c *echo.Context) error {
+	params := newGroupPathParams(c)
+	request, err := transport.DecodeIndividualMembersAddRequest(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError("request body must be valid JSON"))
+	}
+	input, err := request.ToDomain(params.workspaceID, params.groupID)
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		return c.JSON(http.StatusBadRequest, validationError("request body is invalid"))
+	}
+	members, err := h.service.AddIndividualMembers(c.Request().Context(), input)
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		if errors.Is(err, group.ErrDuplicateMember) {
+			return c.JSON(http.StatusConflict, exception.WrapResponse(exception.New("conflict", "Individual member already exists", exception.WithDetails(map[string]any{}))))
+		}
+		if errors.Is(err, group.ErrNotFound) {
+			return c.JSON(http.StatusNotFound, exception.WrapResponse(exception.New("not_found", "Group not found", exception.WithDetails(map[string]any{}))))
+		}
+		h.logger.Warn("failed to add group individual members", "err", err, "workspace_id", params.workspaceID, "group_id", params.groupID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.JSON(http.StatusCreated, transport.NewIndividualMembersAddResponse(members))
+}
+
+func (h *GroupHandler) UpdateIndividualMemberExpiration(c *echo.Context) error {
+	params := newGroupPathParams(c)
+	request, err := transport.DecodeIndividualMemberExpirationUpdateRequest(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError("request body must be valid JSON"))
+	}
+	input, err := request.ToDomain(params.workspaceID, params.groupID, c.Param("nt_account"))
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		return c.JSON(http.StatusBadRequest, validationError("request body is invalid"))
+	}
+	if err := h.service.UpdateIndividualMemberExpiration(c.Request().Context(), input); err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		if errors.Is(err, group.ErrNotFound) {
+			return c.JSON(http.StatusNotFound, exception.WrapResponse(exception.New("not_found", "Individual member not found", exception.WithDetails(map[string]any{}))))
+		}
+		h.logger.Warn("failed to update group individual member expiration", "err", err, "workspace_id", params.workspaceID, "group_id", params.groupID, "nt_account", c.Param("nt_account"))
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *GroupHandler) DeleteIndividualMember(c *echo.Context) error {
+	params := newGroupPathParams(c)
+	err := h.service.DeleteIndividualMember(c.Request().Context(), group.DeleteIndividualMemberInput{
+		WorkspaceID: params.workspaceID,
+		GroupID:     params.groupID,
+		NTAccount:   c.Param("nt_account"),
+	})
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to delete group individual member", "err", err, "workspace_id", params.workspaceID, "group_id", params.groupID, "nt_account", c.Param("nt_account"))
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func validationError(message string) exception.ErrorResponse {

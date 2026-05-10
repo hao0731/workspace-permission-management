@@ -93,6 +93,25 @@ type ListIndividualMembersQuery struct {
 	Cursor      *IndividualMemberCursor
 }
 
+type AddIndividualMembersInput struct {
+	WorkspaceID       string
+	GroupID           string
+	IndividualMembers []IndividualMember
+}
+
+type UpdateIndividualMemberExpirationInput struct {
+	WorkspaceID    string
+	GroupID        string
+	NTAccount      string
+	ExpirationDate time.Time
+}
+
+type DeleteIndividualMemberInput struct {
+	WorkspaceID string
+	GroupID     string
+	NTAccount   string
+}
+
 type IndividualMemberPage struct {
 	Members     []IndividualMember
 	HasNextPage bool
@@ -198,4 +217,27 @@ func (query ListIndividualMembersQuery) Normalize() ListIndividualMembersQuery {
 		query.Cursor.ID = strings.TrimSpace(query.Cursor.ID)
 	}
 	return query
+}
+
+func (input AddIndividualMembersInput) Normalize() AddIndividualMembersInput {
+	input.WorkspaceID = strings.TrimSpace(input.WorkspaceID)
+	input.GroupID = strings.TrimSpace(input.GroupID)
+	for i := range input.IndividualMembers {
+		input.IndividualMembers[i] = input.IndividualMembers[i].Normalize()
+	}
+	return input
+}
+
+func (input UpdateIndividualMemberExpirationInput) Normalize() UpdateIndividualMemberExpirationInput {
+	input.WorkspaceID = strings.TrimSpace(input.WorkspaceID)
+	input.GroupID = strings.TrimSpace(input.GroupID)
+	input.NTAccount = strings.TrimSpace(input.NTAccount)
+	return input
+}
+
+func (input DeleteIndividualMemberInput) Normalize() DeleteIndividualMemberInput {
+	input.WorkspaceID = strings.TrimSpace(input.WorkspaceID)
+	input.GroupID = strings.TrimSpace(input.GroupID)
+	input.NTAccount = strings.TrimSpace(input.NTAccount)
+	return input
 }

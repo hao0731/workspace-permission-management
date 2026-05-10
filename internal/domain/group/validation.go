@@ -98,6 +98,52 @@ func (query ListIndividualMembersQuery) Validate() error {
 	return nil
 }
 
+func (input AddIndividualMembersInput) Validate(now time.Time, opts ...ValidateOption) error {
+	if err := validateGroupIdentity(input.WorkspaceID, input.GroupID); err != nil {
+		return err
+	}
+	options := defaultValidateOptions()
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyValidateOption(&options)
+		}
+	}
+	options = options.withDefaults()
+	if len(input.IndividualMembers) == 0 {
+		return invalidInput("individual members are required")
+	}
+	if len(input.IndividualMembers) > options.maxIndividualMembers {
+		return invalidInput(fmt.Sprintf("individual members must not exceed %d items", options.maxIndividualMembers))
+	}
+	if err := validateIndividualMembersForAdd(input.IndividualMembers, now); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (input UpdateIndividualMemberExpirationInput) Validate(now time.Time) error {
+	if err := validateGroupIdentity(input.WorkspaceID, input.GroupID); err != nil {
+		return err
+	}
+	if err := validateIndividualMemberAccount(input.NTAccount); err != nil {
+		return err
+	}
+	if input.ExpirationDate.IsZero() {
+		return invalidInput("individual member expiration date is required")
+	}
+	if !input.ExpirationDate.After(now) {
+		return invalidInput("individual member expiration date must be in the future")
+	}
+	return nil
+}
+
+func (input DeleteIndividualMemberInput) Validate() error {
+	if err := validateGroupIdentity(input.WorkspaceID, input.GroupID); err != nil {
+		return err
+	}
+	return validateIndividualMemberAccount(input.NTAccount)
+}
+
 func (rule Rule) Validate() error {
 	if strings.TrimSpace(rule.AttributeKey) == "" {
 		return invalidInput("rule attribute key is required")
@@ -152,6 +198,34 @@ func validateIndividualMembers(members []IndividualMember, now time.Time) error 
 		if !member.ExpirationDate.After(now) {
 			return invalidInput("individual member expiration date must be in the future")
 		}
+	}
+	return nil
+}
+
+func validateIndividualMembersForAdd(members []IndividualMember, now time.Time) error {
+	seen := map[string]struct{}{}
+	for _, member := range members {
+		account := strings.TrimSpace(member.NTAccount)
+		if err := validateIndividualMemberAccount(account); err != nil {
+			return err
+		}
+		if _, ok := seen[account]; ok {
+			return fmt.Errorf("%w: duplicate individual member nt account %q", ErrDuplicateMember, account)
+		}
+		seen[account] = struct{}{}
+		if member.ExpirationDate.IsZero() {
+			return invalidInput("individual member expiration date is required")
+		}
+		if !member.ExpirationDate.After(now) {
+			return invalidInput("individual member expiration date must be in the future")
+		}
+	}
+	return nil
+}
+
+func validateIndividualMemberAccount(account string) error {
+	if strings.TrimSpace(account) == "" {
+		return invalidInput("individual member nt account is required")
 	}
 	return nil
 }

@@ -164,3 +164,84 @@ func TestJSONTimeRejectsInvalidTimestamp(t *testing.T) {
 		t.Fatal("DecodeGroupCreateRequest error = nil, want error")
 	}
 }
+
+func TestDecodeIndividualMembersAddRequestToDomain(t *testing.T) {
+	body := strings.NewReader(`{
+		"individual_members": [
+			{
+				"nt_account": " user2 ",
+				"expiration_date": "2026-06-01T00:00:00Z"
+			}
+		]
+	}`)
+
+	request, err := DecodeIndividualMembersAddRequest(body)
+	if err != nil {
+		t.Fatalf("DecodeIndividualMembersAddRequest error = %v, want nil", err)
+	}
+	input, err := request.ToDomain("workspace-1", "group-1")
+	if err != nil {
+		t.Fatalf("ToDomain error = %v, want nil", err)
+	}
+	if input.WorkspaceID != "workspace-1" || input.GroupID != "group-1" {
+		t.Fatalf("identity = %q/%q, want workspace-1/group-1", input.WorkspaceID, input.GroupID)
+	}
+	if len(input.IndividualMembers) != 1 || input.IndividualMembers[0].NTAccount != " user2 " {
+		t.Fatalf("members = %+v, want original account value before domain normalization", input.IndividualMembers)
+	}
+}
+
+func TestDecodeIndividualMembersAddRequestRejectsInvalidTimestamp(t *testing.T) {
+	_, err := DecodeIndividualMembersAddRequest(strings.NewReader(`{
+		"individual_members": [
+			{
+				"nt_account": "user2",
+				"expiration_date": "not-a-time"
+			}
+		]
+	}`))
+	if err == nil {
+		t.Fatal("DecodeIndividualMembersAddRequest error = nil, want error")
+	}
+}
+
+func TestIndividualMembersAddRequestToDomainRejectsMissingExpiration(t *testing.T) {
+	request := IndividualMembersAddRequest{
+		IndividualMembers: []IndividualMemberRequest{{NTAccount: "user2"}},
+	}
+
+	_, err := request.ToDomain("workspace-1", "group-1")
+	if !errors.Is(err, group.ErrInvalidInput) {
+		t.Fatalf("ToDomain error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestDecodeIndividualMemberExpirationUpdateRequestToDomain(t *testing.T) {
+	request, err := DecodeIndividualMemberExpirationUpdateRequest(strings.NewReader(`{
+		"expiration_date": "2026-07-01T00:00:00Z"
+	}`))
+	if err != nil {
+		t.Fatalf("DecodeIndividualMemberExpirationUpdateRequest error = %v, want nil", err)
+	}
+
+	input, err := request.ToDomain("workspace-1", "group-1", "user2")
+	if err != nil {
+		t.Fatalf("ToDomain error = %v, want nil", err)
+	}
+	if input.WorkspaceID != "workspace-1" || input.GroupID != "group-1" || input.NTAccount != "user2" {
+		t.Fatalf("input = %+v, want path identity", input)
+	}
+	want := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if !input.ExpirationDate.Equal(want) {
+		t.Fatalf("ExpirationDate = %s, want %s", input.ExpirationDate, want)
+	}
+}
+
+func TestIndividualMemberExpirationUpdateRequestToDomainRejectsMissingExpiration(t *testing.T) {
+	request := IndividualMemberExpirationUpdateRequest{}
+
+	_, err := request.ToDomain("workspace-1", "group-1", "user2")
+	if !errors.Is(err, group.ErrInvalidInput) {
+		t.Fatalf("ToDomain error = %v, want ErrInvalidInput", err)
+	}
+}
