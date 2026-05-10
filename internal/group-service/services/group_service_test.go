@@ -15,16 +15,25 @@ type fakeGroupRepository struct {
 	deleteInput     group.DeleteInput
 	updateInput     group.UpdateGroupingRuleInput
 	listQuery       group.ListIndividualMembersQuery
+	addInput        group.AddIndividualMembersInput
+	memberUpdate    group.UpdateIndividualMemberExpirationInput
+	memberDelete    group.DeleteIndividualMemberInput
 	model           *group.Group
 	page            group.IndividualMemberPage
+	addedMembers    []group.IndividualMember
 	err             error
 	calls           int
 	getCalls        int
 	deleteCalls     int
 	updateCalls     int
 	listCalls       int
+	memberAddCalls  int
+	memberUpdCalls  int
+	memberDelCalls  int
 	deleteTimestamp time.Time
 	updateTimestamp time.Time
+	memberUpdTime   time.Time
+	memberDelTime   time.Time
 }
 
 func (f *fakeGroupRepository) Create(ctx context.Context, input group.Group) (group.Group, error) {
@@ -66,6 +75,32 @@ func (f *fakeGroupRepository) ListIndividualMembers(ctx context.Context, query g
 		return group.IndividualMemberPage{}, f.err
 	}
 	return f.page, nil
+}
+
+func (f *fakeGroupRepository) AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error) {
+	f.memberAddCalls++
+	f.addInput = input
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.addedMembers != nil {
+		return f.addedMembers, nil
+	}
+	return input.IndividualMembers, nil
+}
+
+func (f *fakeGroupRepository) UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput, updatedAt time.Time) error {
+	f.memberUpdCalls++
+	f.memberUpdate = input
+	f.memberUpdTime = updatedAt
+	return f.err
+}
+
+func (f *fakeGroupRepository) DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput, deletedAt time.Time) error {
+	f.memberDelCalls++
+	f.memberDelete = input
+	f.memberDelTime = deletedAt
+	return f.err
 }
 
 func fixedNow() time.Time {
@@ -334,5 +369,155 @@ func TestGroupServiceListIndividualMembers(t *testing.T) {
 	}
 	if repository.listQuery.WorkspaceID != "workspace-1" || repository.listQuery.GroupID != "group-1" {
 		t.Fatalf("query = %+v, want trimmed identity", repository.listQuery)
+	}
+}
+
+func TestGroupServiceAddIndividualMembers(t *testing.T) {
+	repository := &fakeGroupRepository{}
+	ids := []string{"member-2"}
+	service := NewGroupService(repository,
+		WithGroupClock(fixedNow),
+		WithGroupIDGenerator(func() string {
+			id := ids[0]
+			ids = ids[1:]
+			return id
+		}),
+	)
+
+	members, err := service.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
+		WorkspaceID: " workspace-1 ",
+		GroupID:     " group-1 ",
+		IndividualMembers: []group.IndividualMember{{
+			NTAccount:      " user2 ",
+			ExpirationDate: serviceFutureTime(),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AddIndividualMembers error = %v, want nil", err)
+	}
+	if repository.memberAddCalls != 1 {
+		t.Fatalf("member add calls = %d, want 1", repository.memberAddCalls)
+	}
+	if len(members) != 1 || members[0].ID != "member-2" || members[0].GroupID != "group-1" {
+		t.Fatalf("members = %+v, want generated member for group-1", members)
+	}
+	if !members[0].CreatedAt.Equal(fixedNow()) || !members[0].UpdatedAt.Equal(fixedNow()) {
+		t.Fatalf("timestamps = %s/%s, want fixed now", members[0].CreatedAt, members[0].UpdatedAt)
+	}
+}
+
+func TestGroupServiceAddIndividualMembersValidationFailureDoesNotCallRepository(t *testing.T) {
+	repository := &fakeGroupRepository{}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	_, err := service.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
+		WorkspaceID: "workspace-1",
+		GroupID:     "group-1",
+	})
+	if !errors.Is(err, group.ErrInvalidInput) {
+		t.Fatalf("AddIndividualMembers error = %v, want ErrInvalidInput", err)
+	}
+	if repository.memberAddCalls != 0 {
+		t.Fatalf("member add calls = %d, want 0", repository.memberAddCalls)
+	}
+}
+
+func TestGroupServiceAddIndividualMembersPreservesKnownErrors(t *testing.T) {
+	for _, knownErr := range []error{group.ErrDuplicateMember, group.ErrNotFound} {
+		t.Run(knownErr.Error(), func(t *testing.T) {
+			repository := &fakeGroupRepository{err: knownErr}
+			service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+			_, err := service.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
+				WorkspaceID: "workspace-1",
+				GroupID:     "group-1",
+				IndividualMembers: []group.IndividualMember{{
+					NTAccount:      "user2",
+					ExpirationDate: serviceFutureTime(),
+				}},
+			})
+			if !errors.Is(err, knownErr) {
+				t.Fatalf("AddIndividualMembers error = %v, want %v", err, knownErr)
+			}
+		})
+	}
+}
+
+func TestGroupServiceUpdateIndividualMemberExpiration(t *testing.T) {
+	repository := &fakeGroupRepository{}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	err := service.UpdateIndividualMemberExpiration(context.Background(), group.UpdateIndividualMemberExpirationInput{
+		WorkspaceID:    " workspace-1 ",
+		GroupID:        " group-1 ",
+		NTAccount:      " user2 ",
+		ExpirationDate: serviceFutureTime(),
+	})
+	if err != nil {
+		t.Fatalf("UpdateIndividualMemberExpiration error = %v, want nil", err)
+	}
+	if repository.memberUpdCalls != 1 {
+		t.Fatalf("member update calls = %d, want 1", repository.memberUpdCalls)
+	}
+	if repository.memberUpdate.NTAccount != "user2" {
+		t.Fatalf("member update = %+v, want trimmed user2", repository.memberUpdate)
+	}
+	if !repository.memberUpdTime.Equal(fixedNow()) {
+		t.Fatalf("updatedAt = %s, want fixed now", repository.memberUpdTime)
+	}
+}
+
+func TestGroupServiceUpdateIndividualMemberExpirationNotFound(t *testing.T) {
+	repository := &fakeGroupRepository{err: group.ErrNotFound}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	err := service.UpdateIndividualMemberExpiration(context.Background(), group.UpdateIndividualMemberExpirationInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		NTAccount:      "user2",
+		ExpirationDate: serviceFutureTime(),
+	})
+	if !errors.Is(err, group.ErrNotFound) {
+		t.Fatalf("UpdateIndividualMemberExpiration error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGroupServiceDeleteIndividualMember(t *testing.T) {
+	repository := &fakeGroupRepository{}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	err := service.DeleteIndividualMember(context.Background(), group.DeleteIndividualMemberInput{
+		WorkspaceID: " workspace-1 ",
+		GroupID:     " group-1 ",
+		NTAccount:   " user2 ",
+	})
+	if err != nil {
+		t.Fatalf("DeleteIndividualMember error = %v, want nil", err)
+	}
+	if repository.memberDelCalls != 1 {
+		t.Fatalf("member delete calls = %d, want 1", repository.memberDelCalls)
+	}
+	if repository.memberDelete.NTAccount != "user2" {
+		t.Fatalf("member delete = %+v, want trimmed user2", repository.memberDelete)
+	}
+	if !repository.memberDelTime.Equal(fixedNow()) {
+		t.Fatalf("deletedAt = %s, want fixed now", repository.memberDelTime)
+	}
+}
+
+func TestGroupServiceDeleteIndividualMemberValidationFailureDoesNotCallRepository(t *testing.T) {
+	repository := &fakeGroupRepository{}
+	service := NewGroupService(repository, WithGroupClock(fixedNow))
+
+	err := service.DeleteIndividualMember(context.Background(), group.DeleteIndividualMemberInput{
+		WorkspaceID: "workspace-1",
+		GroupID:     "group-1",
+		NTAccount:   " ",
+	})
+	if !errors.Is(err, group.ErrInvalidInput) {
+		t.Fatalf("DeleteIndividualMember error = %v, want ErrInvalidInput", err)
+	}
+	if repository.memberDelCalls != 0 {
+		t.Fatalf("member delete calls = %d, want 0", repository.memberDelCalls)
 	}
 }

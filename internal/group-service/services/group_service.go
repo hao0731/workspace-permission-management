@@ -17,6 +17,9 @@ type GroupRepository interface {
 	Delete(ctx context.Context, input group.DeleteInput, deletedAt time.Time) error
 	UpdateGroupingRule(ctx context.Context, input group.UpdateGroupingRuleInput, updatedAt time.Time) error
 	ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error)
+	AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error)
+	UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput, updatedAt time.Time) error
+	DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput, deletedAt time.Time) error
 }
 
 type GroupOption func(*GroupService)
@@ -146,6 +149,49 @@ func (s *GroupService) ListIndividualMembers(ctx context.Context, query group.Li
 		return group.IndividualMemberPage{}, fmt.Errorf("list group individual members: %w", err)
 	}
 	return page, nil
+}
+
+func (s *GroupService) AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error) {
+	now := s.now().UTC()
+	input = input.Normalize()
+	if err := input.Validate(now, s.validateOptions...); err != nil {
+		return nil, err
+	}
+	input.IndividualMembers = s.newIndividualMembers(input.GroupID, input.IndividualMembers, now)
+	members, err := s.repository.AddIndividualMembers(ctx, input)
+	if err != nil {
+		if errors.Is(err, group.ErrDuplicateMember) || errors.Is(err, group.ErrNotFound) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("add group individual members: %w", err)
+	}
+	return members, nil
+}
+
+func (s *GroupService) UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput) error {
+	now := s.now().UTC()
+	input = input.Normalize()
+	if err := input.Validate(now); err != nil {
+		return err
+	}
+	if err := s.repository.UpdateIndividualMemberExpiration(ctx, input, now); err != nil {
+		if errors.Is(err, group.ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("update group individual member expiration: %w", err)
+	}
+	return nil
+}
+
+func (s *GroupService) DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput) error {
+	input = input.Normalize()
+	if err := input.Validate(); err != nil {
+		return err
+	}
+	if err := s.repository.DeleteIndividualMember(ctx, input, s.now().UTC()); err != nil {
+		return fmt.Errorf("delete group individual member: %w", err)
+	}
+	return nil
 }
 
 func (s *GroupService) newIndividualMembers(groupID string, input []group.IndividualMember, now time.Time) []group.IndividualMember {
