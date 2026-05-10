@@ -217,6 +217,100 @@ func (r *MongoGroupRepository) ListIndividualMembers(ctx context.Context, query 
 	return buildIndividualMemberPage(docs, query.Limit), nil
 }
 
+func (r *MongoGroupRepository) AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error) {
+	session, err := r.client.StartSession()
+	if err != nil {
+		return nil, fmt.Errorf("start individual member add session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		exists, existsErr := r.activeGroupExists(sessionCtx, group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID})
+		if existsErr != nil {
+			return nil, existsErr
+		}
+		if !exists {
+			return nil, group.ErrNotFound
+		}
+		docs := make([]any, 0, len(input.IndividualMembers))
+		for _, member := range input.IndividualMembers {
+			docs = append(docs, individualMemberDocument{
+				ID:             member.ID,
+				GroupID:        member.GroupID,
+				NTAccount:      member.NTAccount,
+				ExpirationDate: member.ExpirationDate,
+				CreatedAt:      member.CreatedAt,
+				UpdatedAt:      member.UpdatedAt,
+				DeletedAt:      member.DeletedAt,
+			})
+		}
+		if _, insertErr := r.members.InsertMany(sessionCtx, docs); insertErr != nil {
+			return nil, mapMemberInsertError(insertErr)
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return input.IndividualMembers, nil
+}
+
+func (r *MongoGroupRepository) UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput, updatedAt time.Time) error {
+	session, err := r.client.StartSession()
+	if err != nil {
+		return fmt.Errorf("start individual member update session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		exists, existsErr := r.activeGroupExists(sessionCtx, group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID})
+		if existsErr != nil {
+			return nil, existsErr
+		}
+		if !exists {
+			return nil, group.ErrNotFound
+		}
+		result, updateErr := r.members.UpdateOne(sessionCtx,
+			activeIndividualMemberFilter(input.GroupID, input.NTAccount),
+			bson.M{"$set": bson.M{"expiration_date": input.ExpirationDate, "updated_at": updatedAt}},
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("update group individual member expiration: %w", updateErr)
+		}
+		if result.MatchedCount == 0 {
+			return nil, group.ErrNotFound
+		}
+		return nil, nil
+	})
+	return err
+}
+
+func (r *MongoGroupRepository) DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput, deletedAt time.Time) error {
+	session, err := r.client.StartSession()
+	if err != nil {
+		return fmt.Errorf("start individual member delete session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		exists, existsErr := r.activeGroupExists(sessionCtx, group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID})
+		if existsErr != nil {
+			return nil, existsErr
+		}
+		if !exists {
+			return nil, nil
+		}
+		if _, updateErr := r.members.UpdateOne(sessionCtx,
+			activeIndividualMemberFilter(input.GroupID, input.NTAccount),
+			bson.M{"$set": bson.M{"deleted_at": deletedAt, "updated_at": deletedAt}},
+		); updateErr != nil {
+			return nil, fmt.Errorf("soft delete group individual member: %w", updateErr)
+		}
+		return nil, nil
+	})
+	return err
+}
+
 func groupIndexModels() []mongo.IndexModel {
 	return []mongo.IndexModel{
 		{
@@ -271,6 +365,26 @@ func activeGroupFilter(query group.GetQuery) bson.M {
 	}
 }
 
+func (r *MongoGroupRepository) activeGroupExists(ctx context.Context, query group.GetQuery) (bool, error) {
+	var doc groupDocument
+	err := r.groups.FindOne(ctx, activeGroupFilter(query)).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, nil
+		}
+		return false, fmt.Errorf("find active group: %w", err)
+	}
+	return true, nil
+}
+
+func activeIndividualMemberFilter(groupID string, ntAccount string) bson.M {
+	return bson.M{
+		"group_id":   groupID,
+		"nt_account": ntAccount,
+		"deleted_at": nil,
+	}
+}
+
 func buildIndividualMemberListFilter(query group.ListIndividualMembersQuery) bson.M {
 	filter := bson.M{
 		"group_id":   query.GroupID,
@@ -290,6 +404,13 @@ func mapGroupInsertError(err error) error {
 		return fmt.Errorf("%w: active group name already exists", group.ErrDuplicateName)
 	}
 	return fmt.Errorf("insert group: %w", err)
+}
+
+func mapMemberInsertError(err error) error {
+	if isDuplicateIndex(err, membersActiveGroupAccountUniqueIndexName) {
+		return fmt.Errorf("%w: active individual member already exists", group.ErrDuplicateMember)
+	}
+	return fmt.Errorf("insert group individual members: %w", err)
 }
 
 func isDuplicateIndex(err error, indexName string) bool {

@@ -140,6 +140,15 @@ func TestBuildIndividualMemberListFilter(t *testing.T) {
 	}
 }
 
+func TestActiveIndividualMemberFilter(t *testing.T) {
+	filter := activeIndividualMemberFilter("group-1", "user2")
+	want := bson.M{"group_id": "group-1", "nt_account": "user2", "deleted_at": nil}
+
+	if !reflect.DeepEqual(filter, want) {
+		t.Fatalf("filter = %#v, want %#v", filter, want)
+	}
+}
+
 func TestMongoGroupRepositoryUpdateGroupingRuleUsesUpdateResultForExistence(t *testing.T) {
 	var commands []string
 	monitor := &event.CommandMonitor{
@@ -248,6 +257,20 @@ func TestIsDuplicateIndex(t *testing.T) {
 	}
 	if isDuplicateIndex(err, membersActiveGroupAccountUniqueIndexName) {
 		t.Fatal("isDuplicateIndex for member index = true, want false")
+	}
+}
+
+func TestMapMemberInsertError(t *testing.T) {
+	err := mongo.WriteException{
+		WriteErrors: []mongo.WriteError{{
+			Code:    11000,
+			Message: "E11000 duplicate key error collection: group_individual_members index: " + membersActiveGroupAccountUniqueIndexName + " dup key",
+		}},
+	}
+
+	mapped := mapMemberInsertError(err)
+	if !errors.Is(mapped, group.ErrDuplicateMember) {
+		t.Fatalf("mapped error = %v, want ErrDuplicateMember", mapped)
 	}
 }
 
@@ -518,6 +541,194 @@ func TestMongoGroupRepositoryListIndividualMembersIntegration(t *testing.T) {
 	}
 	if !page.HasNextPage || page.NextCursor == nil || page.NextCursor.ID != "member-2" {
 		t.Fatalf("page = %+v, want next cursor for member-2", page)
+	}
+}
+
+func TestMongoGroupRepositoryAddIndividualMembersIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+	model := repositoryGroup()
+	model.IndividualMembers = nil
+	if _, err := repository.Create(context.Background(), model); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+
+	member := group.IndividualMember{
+		ID:             "member-2",
+		GroupID:        "group-1",
+		NTAccount:      "user2",
+		ExpirationDate: repositoryTime().Add(24 * time.Hour),
+		CreatedAt:      repositoryTime(),
+		UpdatedAt:      repositoryTime(),
+	}
+	members, err := repository.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
+		WorkspaceID:       "workspace-1",
+		GroupID:           "group-1",
+		IndividualMembers: []group.IndividualMember{member},
+	})
+	if err != nil {
+		t.Fatalf("AddIndividualMembers error = %v, want nil", err)
+	}
+	if len(members) != 1 || members[0].NTAccount != "user2" {
+		t.Fatalf("members = %+v, want user2", members)
+	}
+	count, err := db.Collection(groupIndividualMemberCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1", "nt_account": "user2", "deleted_at": nil})
+	if err != nil {
+		t.Fatalf("count members: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("active member count = %d, want 1", count)
+	}
+}
+
+func TestMongoGroupRepositoryAddIndividualMembersMissingGroupIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+
+	_, err := repository.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
+		WorkspaceID: "workspace-1",
+		GroupID:     "missing",
+		IndividualMembers: []group.IndividualMember{{
+			ID:             "member-2",
+			GroupID:        "missing",
+			NTAccount:      "user2",
+			ExpirationDate: repositoryTime().Add(24 * time.Hour),
+			CreatedAt:      repositoryTime(),
+			UpdatedAt:      repositoryTime(),
+		}},
+	})
+	if !errors.Is(err, group.ErrNotFound) {
+		t.Fatalf("AddIndividualMembers error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMongoGroupRepositoryAddIndividualMembersDuplicateActiveMemberIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+
+	_, err := repository.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
+		WorkspaceID: "workspace-1",
+		GroupID:     "group-1",
+		IndividualMembers: []group.IndividualMember{{
+			ID:             "member-2",
+			GroupID:        "group-1",
+			NTAccount:      "user1",
+			ExpirationDate: repositoryTime().Add(24 * time.Hour),
+			CreatedAt:      repositoryTime(),
+			UpdatedAt:      repositoryTime(),
+		}},
+	})
+	if !errors.Is(err, group.ErrDuplicateMember) {
+		t.Fatalf("AddIndividualMembers error = %v, want ErrDuplicateMember", err)
+	}
+}
+
+func TestMongoGroupRepositoryUpdateIndividualMemberExpirationIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+
+	expiration := repositoryTime().Add(48 * time.Hour)
+	updatedAt := repositoryTime().Add(time.Hour)
+	err := repository.UpdateIndividualMemberExpiration(context.Background(), group.UpdateIndividualMemberExpirationInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		NTAccount:      "user1",
+		ExpirationDate: expiration,
+	}, updatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIndividualMemberExpiration error = %v, want nil", err)
+	}
+	var doc individualMemberDocument
+	err = db.Collection(groupIndividualMemberCollectionName).FindOne(context.Background(), bson.M{"group_id": "group-1", "nt_account": "user1"}).Decode(&doc)
+	if err != nil {
+		t.Fatalf("find member: %v", err)
+	}
+	if !doc.ExpirationDate.Equal(expiration) || !doc.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("member doc = %+v, want updated expiration and updated_at", doc)
+	}
+}
+
+func TestMongoGroupRepositoryUpdateIndividualMemberExpirationMissingMemberIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+
+	err := repository.UpdateIndividualMemberExpiration(context.Background(), group.UpdateIndividualMemberExpirationInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		NTAccount:      "missing",
+		ExpirationDate: repositoryTime().Add(48 * time.Hour),
+	}, repositoryTime().Add(time.Hour))
+	if !errors.Is(err, group.ErrNotFound) {
+		t.Fatalf("UpdateIndividualMemberExpiration error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMongoGroupRepositoryDeleteIndividualMemberIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+
+	deletedAt := repositoryTime().Add(time.Hour)
+	err := repository.DeleteIndividualMember(context.Background(), group.DeleteIndividualMemberInput{
+		WorkspaceID: "workspace-1",
+		GroupID:     "group-1",
+		NTAccount:   "user1",
+	}, deletedAt)
+	if err != nil {
+		t.Fatalf("DeleteIndividualMember error = %v, want nil", err)
+	}
+	count, err := db.Collection(groupIndividualMemberCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1", "nt_account": "user1", "deleted_at": deletedAt})
+	if err != nil {
+		t.Fatalf("count deleted member: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("deleted member count = %d, want 1", count)
+	}
+}
+
+func TestMongoGroupRepositoryDeleteIndividualMemberMissingTargetIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+
+	err := repository.DeleteIndividualMember(context.Background(), group.DeleteIndividualMemberInput{
+		WorkspaceID: "workspace-1",
+		GroupID:     "missing",
+		NTAccount:   "user1",
+	}, repositoryTime().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteIndividualMember missing group error = %v, want nil", err)
 	}
 }
 
