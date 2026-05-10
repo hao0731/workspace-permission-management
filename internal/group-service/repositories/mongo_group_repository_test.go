@@ -3,8 +3,10 @@ package repositories
 import (
 	"context"
 	"errors"
+	"hash/fnv"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/drivertest"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/xoptions"
+)
+
+const (
+	maxMongoDatabaseNameLength    = 63
+	integrationDatabaseNamePrefix = "wpm_group_test_"
 )
 
 func repositoryTime() time.Time {
@@ -146,6 +153,21 @@ func TestActiveIndividualMemberFilter(t *testing.T) {
 
 	if !reflect.DeepEqual(filter, want) {
 		t.Fatalf("filter = %#v, want %#v", filter, want)
+	}
+}
+
+func TestIntegrationDatabaseNameFitsMongoLimit(t *testing.T) {
+	name := integrationDatabaseName("TestMongoGroupRepositoryUpdateIndividualMemberExpirationMissingMemberIntegration")
+	other := integrationDatabaseName("TestMongoGroupRepositoryDeleteIndividualMemberMissingTargetIntegration")
+
+	if len(name) > 63 {
+		t.Fatalf("database name length = %d, want <= 63: %q", len(name), name)
+	}
+	if name == other {
+		t.Fatalf("database names should remain distinct, got %q", name)
+	}
+	if !strings.HasPrefix(name, "wpm_group_test_") {
+		t.Fatalf("database name = %q, want wpm_group_test_ prefix", name)
 	}
 }
 
@@ -747,11 +769,41 @@ func newIntegrationDatabase(t *testing.T) (*mongo.Client, *mongo.Database) {
 			t.Fatalf("disconnect mongodb: %v", err)
 		}
 	})
-	db := client.Database("workspace_permission_management_group_service_test_" + strings.ReplaceAll(t.Name(), "/", "_"))
+	db := client.Database(integrationDatabaseName(t.Name()))
 	t.Cleanup(func() {
 		if err := db.Drop(context.Background()); err != nil {
 			t.Fatalf("drop database: %v", err)
 		}
 	})
 	return client, db
+}
+
+func integrationDatabaseName(testName string) string {
+	sanitized := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		".", "_",
+		"\"", "_",
+		"$", "_",
+		"*", "_",
+		"<", "_",
+		">", "_",
+		":", "_",
+		"|", "_",
+		"?", "_",
+	).Replace(testName)
+	name := integrationDatabaseNamePrefix + sanitized
+	if len(name) <= maxMongoDatabaseNameLength {
+		return name
+	}
+
+	suffix := "_" + integrationDatabaseNameHash(sanitized)
+	availableNameLength := maxMongoDatabaseNameLength - len(integrationDatabaseNamePrefix) - len(suffix)
+	return integrationDatabaseNamePrefix + sanitized[:availableNameLength] + suffix
+}
+
+func integrationDatabaseNameHash(value string) string {
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(value))
+	return strconv.FormatUint(hasher.Sum64(), 36)
 }
