@@ -367,7 +367,7 @@ func activeGroupFilter(query group.GetQuery) bson.M {
 
 func (r *MongoGroupRepository) activeGroupExists(ctx context.Context, query group.GetQuery) (bool, error) {
 	var doc groupDocument
-	err := r.groups.FindOne(ctx, activeGroupFilter(query)).Decode(&doc)
+	err := r.groups.FindOne(ctx, activeGroupFilter(query), options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return false, nil

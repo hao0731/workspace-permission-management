@@ -112,11 +112,11 @@ func (input AddIndividualMembersInput) Validate(now time.Time, opts ...ValidateO
 	if len(input.IndividualMembers) == 0 {
 		return invalidInput("individual members are required")
 	}
-	if err := validateIndividualMembersForAdd(input.IndividualMembers, now); err != nil {
-		return err
-	}
 	if len(input.IndividualMembers) > options.maxIndividualMembers {
 		return invalidInput(fmt.Sprintf("individual members must not exceed %d items", options.maxIndividualMembers))
+	}
+	if err := validateIndividualMembersForAdd(input.IndividualMembers, now); err != nil {
+		return err
 	}
 	return nil
 }

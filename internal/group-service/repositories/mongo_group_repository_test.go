@@ -221,6 +221,56 @@ func TestMongoGroupRepositoryUpdateGroupingRuleUsesUpdateResultForExistence(t *t
 	}
 }
 
+func TestMongoGroupRepositoryActiveGroupExistsUsesIDProjection(t *testing.T) {
+	var projection bson.Raw
+	monitor := &event.CommandMonitor{
+		Started: func(_ context.Context, evt *event.CommandStartedEvent) {
+			if evt.CommandName != "find" {
+				return
+			}
+			var ok bool
+			projection, ok = evt.Command.Lookup("projection").DocumentOK()
+			if !ok {
+				t.Fatal("find command projection is missing")
+			}
+		},
+	}
+	deployment := drivertest.NewMockDeployment(mockFindGroupIDResponse())
+	clientOptions := options.Client().SetMonitor(monitor)
+	if err := xoptions.SetInternalClientOptions(clientOptions, "deployment", deployment); err != nil {
+		t.Fatalf("set mock deployment: %v", err)
+	}
+	client, err := mongo.Connect(clientOptions)
+	if err != nil {
+		t.Fatalf("connect mock mongodb: %v", err)
+	}
+	t.Cleanup(func() {
+		if disconnectErr := client.Disconnect(context.Background()); disconnectErr != nil {
+			t.Fatalf("disconnect mock mongodb: %v", disconnectErr)
+		}
+	})
+	repository := NewMongoGroupRepository(client, client.Database("test"))
+
+	exists, err := repository.activeGroupExists(context.Background(), group.GetQuery{WorkspaceID: "workspace-1", GroupID: "group-1"})
+	if err != nil {
+		t.Fatalf("activeGroupExists error = %v, want nil", err)
+	}
+	if !exists {
+		t.Fatal("activeGroupExists = false, want true")
+	}
+	idValue := projection.Lookup("_id")
+	if idValue.Type != bson.TypeInt32 || idValue.Int32() != 1 {
+		t.Fatalf("projection _id = %v, want int32(1)", idValue)
+	}
+	elements, err := projection.Elements()
+	if err != nil {
+		t.Fatalf("read projection elements: %v", err)
+	}
+	if len(elements) != 1 {
+		t.Fatalf("projection = %s, want only _id", projection)
+	}
+}
+
 func TestIndividualMemberPaginationIndex(t *testing.T) {
 	memberIndexes := individualMemberIndexModels()
 	if len(memberIndexes) != 2 {
@@ -253,6 +303,17 @@ func mockMatchedUpdateResponse() bson.D {
 			{Key: "id", Value: int64(0)},
 			{Key: "ns", Value: "test.groups"},
 			{Key: "firstBatch", Value: bson.A{bson.D{{Key: "n", Value: 1}}}},
+		}},
+	}
+}
+
+func mockFindGroupIDResponse() bson.D {
+	return bson.D{
+		{Key: "ok", Value: 1},
+		{Key: "cursor", Value: bson.D{
+			{Key: "id", Value: int64(0)},
+			{Key: "ns", Value: "test.groups"},
+			{Key: "firstBatch", Value: bson.A{bson.D{{Key: "_id", Value: "group-1"}}}},
 		}},
 	}
 }

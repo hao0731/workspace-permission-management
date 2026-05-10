@@ -538,10 +538,11 @@ func TestAddIndividualMembersInputValidate(t *testing.T) {
 
 func TestAddIndividualMembersInputRejectsInvalidFields(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       AddIndividualMembersInput
-		wantError   error
-		wantMessage string
+		name                 string
+		input                AddIndividualMembersInput
+		maxIndividualMembers int
+		wantError            error
+		wantMessage          string
 	}{
 		{
 			name:        "blank workspace id",
@@ -568,10 +569,11 @@ func TestAddIndividualMembersInputRejectsInvalidFields(t *testing.T) {
 			wantMessage: "individual member nt account is required",
 		},
 		{
-			name:        "duplicate account",
-			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: futureTime()}, {NTAccount: "user1", ExpirationDate: futureTime()}}},
-			wantError:   ErrDuplicateMember,
-			wantMessage: "duplicate individual member nt account",
+			name:                 "duplicate account",
+			input:                AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: futureTime()}, {NTAccount: "user1", ExpirationDate: futureTime()}}},
+			maxIndividualMembers: 2,
+			wantError:            ErrDuplicateMember,
+			wantMessage:          "duplicate individual member nt account",
 		},
 		{
 			name:        "missing expiration",
@@ -591,11 +593,21 @@ func TestAddIndividualMembersInputRejectsInvalidFields(t *testing.T) {
 			wantError:   ErrInvalidInput,
 			wantMessage: "individual members must not exceed 1 items",
 		},
+		{
+			name:        "limit exceeded before duplicate account",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: futureTime()}, {NTAccount: "user1", ExpirationDate: futureTime()}}},
+			wantError:   ErrInvalidInput,
+			wantMessage: "individual members must not exceed 1 items",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.input.Normalize().Validate(validationNow(), WithMaxIndividualMembers(1))
+			maxIndividualMembers := tt.maxIndividualMembers
+			if maxIndividualMembers == 0 {
+				maxIndividualMembers = 1
+			}
+			err := tt.input.Normalize().Validate(validationNow(), WithMaxIndividualMembers(maxIndividualMembers))
 			if !errors.Is(err, tt.wantError) {
 				t.Fatalf("error = %v, want %v", err, tt.wantError)
 			}
