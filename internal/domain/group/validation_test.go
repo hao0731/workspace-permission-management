@@ -514,3 +514,160 @@ func TestListIndividualMembersQueryRejectsInvalidFields(t *testing.T) {
 		})
 	}
 }
+
+func TestAddIndividualMembersInputValidate(t *testing.T) {
+	input := AddIndividualMembersInput{
+		WorkspaceID: " workspace-1 ",
+		GroupID:     " group-1 ",
+		IndividualMembers: []IndividualMember{{
+			NTAccount:      " user2 ",
+			ExpirationDate: futureTime(),
+		}},
+	}.Normalize()
+
+	if err := input.Validate(validationNow(), WithMaxIndividualMembers(1)); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+	if input.WorkspaceID != "workspace-1" || input.GroupID != "group-1" {
+		t.Fatalf("identity = %q/%q, want trimmed values", input.WorkspaceID, input.GroupID)
+	}
+	if input.IndividualMembers[0].NTAccount != "user2" {
+		t.Fatalf("NTAccount = %q, want user2", input.IndividualMembers[0].NTAccount)
+	}
+}
+
+func TestAddIndividualMembersInputRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       AddIndividualMembersInput
+		wantError   error
+		wantMessage string
+	}{
+		{
+			name:        "blank workspace id",
+			input:       AddIndividualMembersInput{WorkspaceID: " ", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: futureTime()}}},
+			wantError:   ErrInvalidInput,
+			wantMessage: "workspace id is required",
+		},
+		{
+			name:        "blank group id",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: " ", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: futureTime()}}},
+			wantError:   ErrInvalidInput,
+			wantMessage: "group id is required",
+		},
+		{
+			name:        "empty members",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1"},
+			wantError:   ErrInvalidInput,
+			wantMessage: "individual members are required",
+		},
+		{
+			name:        "blank account",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: " ", ExpirationDate: futureTime()}}},
+			wantError:   ErrInvalidInput,
+			wantMessage: "individual member nt account is required",
+		},
+		{
+			name:        "duplicate account",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: futureTime()}, {NTAccount: "user1", ExpirationDate: futureTime()}}},
+			wantError:   ErrDuplicateMember,
+			wantMessage: "duplicate individual member nt account",
+		},
+		{
+			name:        "missing expiration",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1"}}},
+			wantError:   ErrInvalidInput,
+			wantMessage: "individual member expiration date is required",
+		},
+		{
+			name:        "past expiration",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: validationNow()}}},
+			wantError:   ErrInvalidInput,
+			wantMessage: "individual member expiration date must be in the future",
+		},
+		{
+			name:        "limit exceeded",
+			input:       AddIndividualMembersInput{WorkspaceID: "workspace-1", GroupID: "group-1", IndividualMembers: []IndividualMember{{NTAccount: "user1", ExpirationDate: futureTime()}, {NTAccount: "user2", ExpirationDate: futureTime()}}},
+			wantError:   ErrInvalidInput,
+			wantMessage: "individual members must not exceed 1 items",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.input.Normalize().Validate(validationNow(), WithMaxIndividualMembers(1))
+			if !errors.Is(err, tt.wantError) {
+				t.Fatalf("error = %v, want %v", err, tt.wantError)
+			}
+			if !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("error = %q, want message containing %q", err.Error(), tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestUpdateIndividualMemberExpirationInputValidate(t *testing.T) {
+	input := UpdateIndividualMemberExpirationInput{
+		WorkspaceID:    " workspace-1 ",
+		GroupID:        " group-1 ",
+		NTAccount:      " user2 ",
+		ExpirationDate: futureTime(),
+	}.Normalize()
+
+	if err := input.Validate(validationNow()); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+	if input.WorkspaceID != "workspace-1" || input.GroupID != "group-1" || input.NTAccount != "user2" {
+		t.Fatalf("input = %+v, want trimmed identity and account", input)
+	}
+}
+
+func TestUpdateIndividualMemberExpirationInputRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       UpdateIndividualMemberExpirationInput
+		wantMessage string
+	}{
+		{
+			name:        "blank account",
+			input:       UpdateIndividualMemberExpirationInput{WorkspaceID: "workspace-1", GroupID: "group-1", NTAccount: " ", ExpirationDate: futureTime()},
+			wantMessage: "individual member nt account is required",
+		},
+		{
+			name:        "missing expiration",
+			input:       UpdateIndividualMemberExpirationInput{WorkspaceID: "workspace-1", GroupID: "group-1", NTAccount: "user1"},
+			wantMessage: "individual member expiration date is required",
+		},
+		{
+			name:        "past expiration",
+			input:       UpdateIndividualMemberExpirationInput{WorkspaceID: "workspace-1", GroupID: "group-1", NTAccount: "user1", ExpirationDate: validationNow()},
+			wantMessage: "individual member expiration date must be in the future",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireInvalidInput(t, tt.input.Normalize().Validate(validationNow()), tt.wantMessage)
+		})
+	}
+}
+
+func TestDeleteIndividualMemberInputValidate(t *testing.T) {
+	input := DeleteIndividualMemberInput{
+		WorkspaceID: " workspace-1 ",
+		GroupID:     " group-1 ",
+		NTAccount:   " user2 ",
+	}.Normalize()
+
+	if err := input.Validate(); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+	if input.WorkspaceID != "workspace-1" || input.GroupID != "group-1" || input.NTAccount != "user2" {
+		t.Fatalf("input = %+v, want trimmed identity and account", input)
+	}
+}
+
+func TestDeleteIndividualMemberInputRejectsBlankAccount(t *testing.T) {
+	err := DeleteIndividualMemberInput{WorkspaceID: "workspace-1", GroupID: "group-1", NTAccount: " "}.Normalize().Validate()
+	requireInvalidInput(t, err, "individual member nt account is required")
+}
