@@ -2,7 +2,7 @@
 
 ## Background
 
-This document defines individual-member read behavior for `group-service`. Individual members are explicit users assigned to a group in addition to any dynamic grouping rules.
+This document defines individual-member read and mutation behavior for `group-service`. Individual members are explicit users assigned to a group in addition to any dynamic grouping rules.
 
 Entry point and shared service concerns are documented in [Group Service Design](group-service.md). Group-level create, read, soft-delete, and grouping-rule replacement behavior is documented in [Group API Design](group-service-group.md).
 
@@ -17,24 +17,32 @@ Required policies:
 
 Policy alignment:
 
-- Member list payloads, cursor tokens, MongoDB queries, and indexes are explicit contracts.
-- Handlers parse path and query input, services own use-case validation, and repositories own MongoDB pagination details.
+- Member list payloads, mutation payloads, cursor tokens, MongoDB queries, and indexes are explicit contracts.
+- Handlers parse path, query, and body input, services own use-case validation, and repositories own MongoDB pagination and mutation details.
 - Request and response DTOs belong in `internal/group-service/transport`.
-- Cursor and list models stay in domain or transport packages without leaking MongoDB driver types to handlers.
+- Cursor, list, and mutation models stay in domain or transport packages without leaking MongoDB driver types to handlers.
 
 ## Goals
 
 - Expose `GET /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members`.
+- Expose `POST /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members`.
+- Expose `PATCH /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account`.
+- Expose `DELETE /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account`.
 - Return active individual members for one active group.
+- Add active individual members to one active group.
+- Update one active individual member's expiration date.
+- Soft-delete one active individual member idempotently.
 - Use cursor-based pagination with `limit` and `next_token`.
 - Sort individual members by `created_at DESC, _id DESC`.
-- Return `members` and `page_info` in the response.
+- Return `members` and `page_info` in list responses.
+- Return added `members` in add responses.
 - Reuse `internal/shared/pagination` for limit parsing and cursor token encode/decode.
 - Keep member reads scoped by an active group lookup using both `workspace_id` and `group_id`.
+- Keep member mutations scoped by an active group lookup using both `workspace_id` and `group_id`.
 
 ## Non-Goals
 
-- Do not implement individual member add, replace, delete, or restore APIs in this phase.
+- Do not implement individual member restore, hard-delete, history, search, or bulk replacement APIs in this phase.
 - Do not evaluate dynamic grouping rules or merge dynamic members into this response.
 - Do not filter members by employee attributes, NT account prefix, expiration date, or active permission status.
 - Do not validate whether `workspace_id` references an existing workspace.
@@ -112,6 +120,146 @@ Field contract:
 - `page_info.has_next_page` is `true` only when another page exists after the returned items.
 - `page_info.next_token` is an opaque string. It is empty when `has_next_page` is `false`.
 
+## Add Individual Members API
+
+Endpoint:
+
+```http
+POST /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members
+```
+
+Path parameters:
+
+- `workspace_id`: workspace scope for the group.
+- `group_id`: group identifier.
+
+Request body:
+
+```json
+{
+  "individual_members": [
+    {
+      "nt_account": "user2",
+      "expiration_date": "2026-06-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+Success response:
+
+```http
+HTTP/1.1 201 Created
+```
+
+```json
+{
+  "members": [
+    {
+      "nt_account": "user2",
+      "expiration_date": "2026-06-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+Behavior:
+
+- First verify that an active group exists for `_id = group_id`, `workspace_id`, and `deleted_at: null`.
+- If no active group exists, return `404 Not Found`.
+- Add every requested member as a new active `group_individual_members` document.
+- Use one service-generated `now` for validation, `created_at`, and `updated_at` across the request.
+- Use one MongoDB transaction for the active group check and member inserts.
+- Return only the members added by this request.
+
+Add field contract:
+
+- `individual_members` is required and must contain at least one item.
+- `individual_members` is limited by `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS`, defaulting to 1000 items.
+- `individual_members[].nt_account` is trimmed before validation, persistence, uniqueness checks, and response rendering.
+- Duplicate `individual_members[].nt_account` values in the same request after trimming return `409 Conflict`.
+- An `nt_account` that already has an active member document in the same group returns `409 Conflict`.
+- `individual_members[].expiration_date` must be accepted as an RFC3339 timestamp string and must be later than the service's request processing time.
+- Member `_id`, `group_id`, `created_at`, `updated_at`, and `deleted_at` are persistence metadata and are not included in the public response.
+
+## Update Individual Member Expiration API
+
+Endpoint:
+
+```http
+PATCH /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account
+```
+
+Path parameters:
+
+- `workspace_id`: workspace scope for the group.
+- `group_id`: group identifier.
+- `nt_account`: individual member account. Clients must URL-encode characters that are not safe in a path segment.
+
+Request body:
+
+```json
+{
+  "expiration_date": "2026-07-01T00:00:00Z"
+}
+```
+
+Success response:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+Behavior:
+
+- First verify that an active group exists for `_id = group_id`, `workspace_id`, and `deleted_at: null`.
+- If no active group exists, return `404 Not Found`.
+- Update only the active member document matching `group_id`, trimmed `nt_account`, and `deleted_at: null`.
+- If no active member exists for that account in the active group, return `404 Not Found`.
+- Set `expiration_date` to the request value and `updated_at` to the service-generated `now`.
+- Do not modify `created_at`, `deleted_at`, or any other member fields.
+- Use one MongoDB transaction for the active group check and member update.
+
+Update field contract:
+
+- `expiration_date` is required.
+- `expiration_date` must be accepted as an RFC3339 timestamp string and must be later than the service's request processing time.
+- The response has no body.
+
+## Delete Individual Member API
+
+Endpoint:
+
+```http
+DELETE /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account
+```
+
+Path parameters:
+
+- `workspace_id`: workspace scope for the group.
+- `group_id`: group identifier.
+- `nt_account`: individual member account. Clients must URL-encode characters that are not safe in a path segment.
+
+Success response:
+
+```http
+HTTP/1.1 204 No Content
+```
+
+Behavior:
+
+- Delete is idempotent and returns `204 No Content` even when the active group or active member is already missing.
+- When an active group exists for `_id = group_id`, `workspace_id`, and `deleted_at: null`, soft-delete the active member document matching `group_id`, trimmed `nt_account`, and `deleted_at: null`.
+- Set `deleted_at` and `updated_at` to the same service-generated `now`.
+- Do not hard-delete member documents.
+- Use one MongoDB transaction for the active group check and member soft delete.
+
+Delete field contract:
+
+- The response has no body.
+- Soft-deleted individual members are excluded from list, update, and add uniqueness checks.
+- A later add request may recreate the same `nt_account` as a new active member document because the unique index only applies to active documents.
+
 ## Cursor Contract
 
 Cursor tokens should encode the last returned member's pagination identity:
@@ -148,28 +296,40 @@ Transport-level validation should reject:
 - `next_token` that is not base64url-encoded JSON.
 - `next_token.created_at` that is missing or not RFC3339.
 - `next_token.id` that is missing or empty.
+- Malformed JSON bodies for add or update.
+- Add requests where `individual_members` is missing, `null`, or empty.
+- Add requests where any `individual_members[].expiration_date` is missing or not RFC3339.
+- Update requests where `expiration_date` is missing or not RFC3339.
 
 Domain or service validation should reject:
 
 - Empty `workspace_id`.
 - Empty `group_id`.
+- Empty or whitespace-only `nt_account` after trimming when the endpoint path or request body includes an account.
 - Non-positive list limits if a non-HTTP caller bypasses transport parsing.
 - Cursors with zero `created_at`.
 - Cursors with empty IDs.
+- Add requests where `individual_members` exceeds the configured `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS` limit.
+- Add requests where duplicate `individual_members[].nt_account` values appear after trimming.
+- Add or update requests where `expiration_date` is not later than the service's request processing time.
 
 ## Error Handling
 
 Status mapping:
 
-- `400 Bad Request`: invalid path identity, invalid limit, invalid cursor token, or invalid decoded cursor fields.
+- `400 Bad Request`: invalid path identity, invalid limit, invalid cursor token, invalid decoded cursor fields, malformed JSON, invalid request shape, empty account values, configured limit violations, or expiration dates that are not in the future.
+- `404 Not Found`: add or update requests where the active group does not exist, or update requests where the active member does not exist.
+- `409 Conflict`: add requests with duplicate `nt_account` values in the same request or an already-active member in the same group.
 - `500 Internal Server Error`: unexpected repository or infrastructure failure.
 - `200 OK`: successful read, including missing group, soft-deleted group, or no matching members.
+- `201 Created`: successful member add.
+- `204 No Content`: successful update or delete. Delete also returns `204` when the active group or active member is already missing.
 
 Missing-group member reads intentionally return an empty page. GET group remains the endpoint clients should use when they need explicit group existence information.
 
 ## Domain Model
 
-The domain package should model member list behavior without Echo or MongoDB dependencies.
+The domain package should model member list and mutation behavior without Echo or MongoDB dependencies.
 
 Primary types:
 
@@ -177,8 +337,11 @@ Primary types:
 - `IndividualMemberCursor`: pagination cursor containing `created_at` and member ID.
 - `ListIndividualMembersQuery`: list identity containing `workspace_id`, `group_id`, `limit`, and optional cursor.
 - `IndividualMemberPage`: page result containing members, `has_next_page`, and optional next cursor.
+- `AddIndividualMembersInput`: add input containing `workspace_id`, `group_id`, and requested individual members.
+- `UpdateIndividualMemberExpirationInput`: update identity containing `workspace_id`, `group_id`, `nt_account`, and the replacement expiration date.
+- `DeleteIndividualMemberInput`: delete identity containing `workspace_id`, `group_id`, and `nt_account`.
 
-The public response should map from `IndividualMemberPage` to transport DTOs and omit internal pagination identity fields from each member.
+List responses should map from `IndividualMemberPage` to transport DTOs. Add responses should map from the added `IndividualMember` records. Both response shapes must omit internal pagination identity and persistence metadata fields from each member.
 
 ## group_individual_members Collection
 
@@ -204,8 +367,8 @@ Field notes:
 - `group_id` references `groups._id`.
 - `nt_account` is trimmed before validation and persistence.
 - `expiration_date` is the explicit membership expiration date.
-- `created_at` and `updated_at` are set to the same service-generated `now` during creation.
-- `updated_at` changes when the member is soft-deleted by group delete.
+- `created_at` and `updated_at` are set to the same service-generated `now` during creation or member add.
+- `updated_at` changes when the member's expiration date is updated, when the member is soft-deleted directly, and when the member is soft-deleted by group delete.
 - `deleted_at` is `null` for active individual member documents.
 
 Indexes:
@@ -217,11 +380,11 @@ partial unique { group_id: 1, nt_account: 1 } where deleted_at == null
 
 Rationale:
 
-- The partial unique index prevents multiple active member rows for the same `group_id + nt_account`.
+- The partial unique index prevents multiple active member rows for the same `group_id + nt_account` and supports direct update/delete lookup by member identity.
 - The pagination index supports active member reads sorted by `created_at DESC, _id DESC`.
-- `group_individual_members` intentionally does not duplicate `workspace_id`; member-list reads confirm group ownership through the active `groups` document first.
+- `group_individual_members` intentionally does not duplicate `workspace_id`; member APIs confirm group ownership through the active `groups` document first.
 
-## Repository Query
+## Repository Flows
 
 Recommended list flow:
 
@@ -242,7 +405,36 @@ Recommended list flow:
 6. If more than `limit` documents are returned, trim the extra item and build the next cursor from the last returned member.
 7. Return members and page metadata to the service.
 
-## Service Workflow
+Recommended add flow:
+
+1. Start a MongoDB transaction.
+2. Read the active group using `_id`, `workspace_id`, and `deleted_at: null`.
+3. If no group exists, return `group.ErrNotFound`.
+4. Insert one `group_individual_members` document for each requested member with generated `_id`, `group_id`, trimmed `nt_account`, `expiration_date`, `created_at`, `updated_at`, and `deleted_at: null`.
+5. Map duplicate-key errors from the partial unique `{ group_id: 1, nt_account: 1 }` index to a stable duplicate-member domain error.
+6. Commit the transaction and return the added members to the service.
+
+Recommended update flow:
+
+1. Start a MongoDB transaction.
+2. Read the active group using `_id`, `workspace_id`, and `deleted_at: null`.
+3. If no group exists, return `group.ErrNotFound`.
+4. Update one active member by `group_id`, trimmed `nt_account`, and `deleted_at: null`, setting `expiration_date` and `updated_at`.
+5. If the update matched no active member, return `group.ErrNotFound`.
+6. Commit the transaction.
+
+Recommended delete flow:
+
+1. Start a MongoDB transaction.
+2. Read the active group using `_id`, `workspace_id`, and `deleted_at: null`.
+3. If no group exists, commit or abort without mutating members and return success.
+4. Soft-delete one active member by `group_id`, trimmed `nt_account`, and `deleted_at: null`, setting `deleted_at` and `updated_at`.
+5. If the update matched no active member, return success.
+6. Commit the transaction.
+
+## Service Workflows
+
+List workflow:
 
 1. Handler extracts `workspace_id`, `group_id`, `limit`, and `next_token`.
 2. Handler uses `internal/shared/pagination.PaginationHelper` to parse `limit`.
@@ -254,6 +446,32 @@ Recommended list flow:
 8. Transport maps members and encodes `next_token`.
 9. Handler renders `200 OK`.
 
+Add workflow:
+
+1. Handler extracts `workspace_id` and `group_id`, decodes the request, and maps it to `group.AddIndividualMembersInput`.
+2. Service normalizes and validates path identity, requested members, request size, duplicate accounts, and future expiration dates.
+3. Service generates member IDs and one timestamp for the request.
+4. Repository verifies active group ownership and inserts the member documents in one transaction.
+5. Repository maps duplicate active members to the duplicate-member domain error.
+6. Transport maps the added members to the `members` response.
+7. Handler renders `201 Created`.
+
+Update workflow:
+
+1. Handler extracts `workspace_id`, `group_id`, and `nt_account`, decodes the request, and maps it to `group.UpdateIndividualMemberExpirationInput`.
+2. Service normalizes and validates path identity, account, and future expiration date.
+3. Service generates one timestamp for `updated_at`.
+4. Repository verifies active group ownership and updates the active member in one transaction.
+5. Handler renders `204 No Content`, or maps missing active group/member to `404 Not Found`.
+
+Delete workflow:
+
+1. Handler extracts `workspace_id`, `group_id`, and `nt_account`.
+2. Service normalizes and validates path identity and account.
+3. Service generates one timestamp for `deleted_at` and `updated_at`.
+4. Repository verifies active group ownership and soft-deletes the active member in one transaction when both exist.
+5. Handler renders `204 No Content` for success, missing active group, or missing active member.
+
 ## REST Client Examples
 
 `examples/api/groups.http` should include:
@@ -264,6 +482,13 @@ Recommended list flow:
 - Missing or soft-deleted group returning an empty page.
 - Invalid `limit` returning `400`.
 - Invalid `next_token` returning `400`.
+- Add individual members successfully.
+- Add individual members with duplicate accounts returning `409`.
+- Add individual members with an invalid expiration date returning `400`.
+- Update an individual member expiration date successfully.
+- Update a missing active member returning `404`.
+- Delete an individual member successfully.
+- Delete a missing active member returning idempotent `204`.
 
 ## Testing Strategy
 
@@ -274,6 +499,15 @@ Domain tests:
 - List query rejects non-positive `limit`.
 - Cursor validation rejects zero `created_at`.
 - Cursor validation rejects empty ID.
+- Add input rejects empty `workspace_id`.
+- Add input rejects empty `group_id`.
+- Add input rejects empty `individual_members`.
+- Add input rejects empty or whitespace-only `nt_account`.
+- Add input rejects duplicate `nt_account` values after trimming.
+- Add input rejects expiration dates that are not in the future.
+- Update input rejects empty `workspace_id`, `group_id`, or `nt_account`.
+- Update input rejects expiration dates that are not in the future.
+- Delete input rejects empty `workspace_id`, `group_id`, or `nt_account`.
 
 Transport tests:
 
@@ -286,11 +520,22 @@ Transport tests:
 - Valid cursor token decodes into domain cursor fields.
 - Response maps `nt_account`, `expiration_date`, and `page_info`.
 - Response omits member `_id`, `group_id`, `created_at`, `updated_at`, and `deleted_at`.
+- Add request maps `individual_members` to domain members.
+- Add response maps added `members` and omits persistence metadata.
+- Update request maps `expiration_date` to a domain update input.
+- Malformed add or update JSON returns a validation error.
+- Missing or invalid add/update `expiration_date` returns a validation error.
 
 Service tests:
 
 - Successful list passes query values to the repository.
 - Missing active group returns an empty page.
+- Successful add validates, generates IDs/timestamps, and passes members to the repository.
+- Add duplicate-member errors are preserved for handler conflict mapping.
+- Successful update validates and passes the replacement expiration date to the repository.
+- Update missing active group/member errors are preserved for handler not-found mapping.
+- Successful delete validates and passes the member identity to the repository.
+- Delete missing active group/member results still return success.
 - Repository failures are wrapped with context.
 - Validation failures do not call the repository.
 
@@ -303,13 +548,30 @@ Repository tests:
 - List applies `created_at DESC, _id DESC` sort.
 - List applies cursor boundary correctly.
 - List fetches `limit + 1` and builds `has_next_page` and next cursor correctly.
+- Add verifies active group ownership before inserting members.
+- Add inserts all requested members in one transaction.
+- Add maps duplicate-key errors on active `group_id + nt_account` to the duplicate-member domain error.
+- Update verifies active group ownership before updating a member.
+- Update changes only `expiration_date` and `updated_at` on the active member.
+- Update returns not found when the active group or active member is missing.
+- Delete verifies active group ownership before soft-deleting a member.
+- Delete sets `deleted_at` and `updated_at` to the same timestamp.
+- Delete returns success when the active group or active member is missing.
 - Pagination index is created as `{ group_id: 1, created_at: -1, _id: -1 }`.
 
 Handler tests:
 
 - Successful list returns `200` and the documented response body.
 - Missing group returns `200` with an empty page.
+- Successful add returns `201` and the documented response body.
+- Add duplicate member returns `409`.
+- Add missing active group returns `404`.
+- Successful update returns `204`.
+- Update missing active group/member returns `404`.
+- Successful delete returns `204`.
+- Delete missing active group/member returns `204`.
 - Invalid path identity returns `400`.
 - Invalid `limit` returns `400`.
 - Invalid `next_token` returns `400`.
+- Invalid add/update body returns `400`.
 - Unexpected service failure returns `500`.
