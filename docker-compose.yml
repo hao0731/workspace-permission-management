@@ -89,6 +89,10 @@ services:
       FUNCTION_SERVICE_JETSTREAM_DURABLE: ${FUNCTION_SERVICE_JETSTREAM_DURABLE:-function-service-resource-upserter}
       FUNCTION_SERVICE_JETSTREAM_SUBJECT: ${FUNCTION_SERVICE_JETSTREAM_SUBJECT:-app.todo.resource.upserted}
       FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT: ${FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT:-app.todo.resource.deleted}
+      GROUP_SERVICE_NATS_URL: nats://nats:4222
+      GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM: ${GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM:-GROUP_EXPIRY}
+      GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE: ${GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE:-group-service-expiry}
+      GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT: ${GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT:-app.todo.group.expiry.process}
     entrypoint: ["/bin/sh", "-euc"]
     command:
       - |
@@ -109,6 +113,27 @@ services:
         if ! nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer info "$$FUNCTION_SERVICE_JETSTREAM_STREAM" "$$FUNCTION_SERVICE_JETSTREAM_DURABLE" >/dev/null 2>&1; then
           nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer add "$$FUNCTION_SERVICE_JETSTREAM_STREAM" "$$FUNCTION_SERVICE_JETSTREAM_DURABLE" \
             --filter "$$FUNCTION_SERVICE_JETSTREAM_SUBJECT" \
+            --pull \
+            --ack explicit \
+            --deliver all \
+            --replay instant \
+            --max-deliver=-1 \
+            --defaults
+        fi
+
+        if ! nats --server "$$GROUP_SERVICE_NATS_URL" stream info "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM" >/dev/null 2>&1; then
+          nats --server "$$GROUP_SERVICE_NATS_URL" stream add "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM" \
+            --subjects "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT" \
+            --storage file \
+            --retention limits \
+            --discard old \
+            --replicas 1 \
+            --defaults
+        fi
+
+        if ! nats --server "$$GROUP_SERVICE_NATS_URL" consumer info "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM" "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE" >/dev/null 2>&1; then
+          nats --server "$$GROUP_SERVICE_NATS_URL" consumer add "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM" "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE" \
+            --filter "$$GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT" \
             --pull \
             --ack explicit \
             --deliver all \
