@@ -20,47 +20,87 @@ type groupExpiryCommandData struct {
 }
 
 func ParseGroupExpiryCommandEvent(data []byte, expectedType string) (group.ExpireGroupingRuleCommand, error) {
-	var event cloudevents.Event
-	if err := json.Unmarshal(data, &event); err != nil {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("parse cloudevent: %w", err)
-	}
-	if err := event.Validate(); err != nil {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("validate cloudevent: %w", err)
-	}
-	if event.SpecVersion() != cloudEventSpecVersion {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("unsupported cloudevent specversion %q", event.SpecVersion())
-	}
-	if event.Type() != expectedType {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("cloudevent type %q does not match expected %q", event.Type(), expectedType)
-	}
-	if event.DataContentType() != "application/json" {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("cloudevent datacontenttype must be application/json")
-	}
-	if event.Time().IsZero() {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("cloudevent time is required")
-	}
+	return parseExpiryCommandEvent[groupExpiryCommandData, group.ExpireGroupingRuleCommand](
+		data,
+		expectedType,
+		"group expiry command data contains empty required field",
+	)
+}
 
-	var payload groupExpiryCommandData
-	if err := event.DataAs(&payload); err != nil {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("parse cloudevent data: %w", err)
-	}
-	if event.Subject() != payload.TaskID {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("cloudevent subject must match data.task_id")
-	}
-	if strings.TrimSpace(payload.TaskID) == "" ||
+func (payload groupExpiryCommandData) taskID() string {
+	return payload.TaskID
+}
+
+func (payload groupExpiryCommandData) hasEmptyRequiredField() bool {
+	return strings.TrimSpace(payload.TaskID) == "" ||
 		strings.TrimSpace(payload.WorkspaceID) == "" ||
 		strings.TrimSpace(payload.GroupID) == "" ||
-		strings.TrimSpace(payload.ExpirationBucket) == "" {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("group expiry command data contains empty required field")
-	}
-	command := group.ExpireGroupingRuleCommand{
+		strings.TrimSpace(payload.ExpirationBucket) == ""
+}
+
+func (payload groupExpiryCommandData) expirationBucket() string {
+	return payload.ExpirationBucket
+}
+
+func (payload groupExpiryCommandData) toCommand() group.ExpireGroupingRuleCommand {
+	return group.ExpireGroupingRuleCommand{
 		TaskID:           payload.TaskID,
 		WorkspaceID:      payload.WorkspaceID,
 		GroupID:          payload.GroupID,
 		ExpirationBucket: payload.ExpirationBucket,
 	}.Normalize()
-	if !group.IsValidExpirationBucket(command.ExpirationBucket) {
-		return group.ExpireGroupingRuleCommand{}, fmt.Errorf("expiration_bucket must use yyyy-MM-dd")
+}
+
+type expiryCommandEventPayload[C any] interface {
+	taskID() string
+	hasEmptyRequiredField() bool
+	expirationBucket() string
+	toCommand() C
+}
+
+func parseExpiryCommandEvent[P expiryCommandEventPayload[C], C any](data []byte, expectedType string, emptyFieldMessage string) (C, error) {
+	var zero C
+
+	event, err := parseCommandCloudEvent(data, expectedType)
+	if err != nil {
+		return zero, err
 	}
-	return command, nil
+
+	var payload P
+	if err := event.DataAs(&payload); err != nil {
+		return zero, fmt.Errorf("parse cloudevent data: %w", err)
+	}
+	if event.Subject() != payload.taskID() {
+		return zero, fmt.Errorf("cloudevent subject must match data.task_id")
+	}
+	if payload.hasEmptyRequiredField() {
+		return zero, fmt.Errorf("%s", emptyFieldMessage)
+	}
+	if !group.IsValidExpirationBucket(payload.expirationBucket()) {
+		return zero, fmt.Errorf("expiration_bucket must use yyyy-MM-dd")
+	}
+	return payload.toCommand(), nil
+}
+
+func parseCommandCloudEvent(data []byte, expectedType string) (cloudevents.Event, error) {
+	var event cloudevents.Event
+	if err := json.Unmarshal(data, &event); err != nil {
+		return cloudevents.Event{}, fmt.Errorf("parse cloudevent: %w", err)
+	}
+	if err := event.Validate(); err != nil {
+		return cloudevents.Event{}, fmt.Errorf("validate cloudevent: %w", err)
+	}
+	if event.SpecVersion() != cloudEventSpecVersion {
+		return cloudevents.Event{}, fmt.Errorf("unsupported cloudevent specversion %q", event.SpecVersion())
+	}
+	if event.Type() != expectedType {
+		return cloudevents.Event{}, fmt.Errorf("cloudevent type %q does not match expected %q", event.Type(), expectedType)
+	}
+	if event.DataContentType() != "application/json" {
+		return cloudevents.Event{}, fmt.Errorf("cloudevent datacontenttype must be application/json")
+	}
+	if event.Time().IsZero() {
+		return cloudevents.Event{}, fmt.Errorf("cloudevent time is required")
+	}
+	return event, nil
 }
