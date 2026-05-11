@@ -349,6 +349,80 @@ func (r *MongoGroupRepository) DeleteIndividualMember(ctx context.Context, input
 	return err
 }
 
+func (r *MongoGroupRepository) ExpireGroupingRule(ctx context.Context, input group.ExpireGroupingRuleCommand, expiredAt time.Time, bucketLocation *time.Location) (group.ExpireGroupingRuleStatus, error) {
+	session, err := r.client.StartSession()
+	if err != nil {
+		return "", fmt.Errorf("start grouping rule expiry session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	var status group.ExpireGroupingRuleStatus
+	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		task, taskErr := r.findExpiryTask(sessionCtx, input)
+		if taskErr != nil {
+			return nil, taskErr
+		}
+		if task == nil {
+			status = group.ExpireGroupingRuleStatusStaleTask
+			return nil, nil
+		}
+
+		var doc groupDocument
+		findGroupErr := r.groups.FindOne(sessionCtx, activeGroupFilter(group.GetQuery{
+			WorkspaceID: input.WorkspaceID,
+			GroupID:     input.GroupID,
+		})).Decode(&doc)
+		if findGroupErr != nil {
+			if errors.Is(findGroupErr, mongo.ErrNoDocuments) {
+				if deleteErr := r.deleteExpiryTaskByID(sessionCtx, input.TaskID); deleteErr != nil {
+					return nil, deleteErr
+				}
+				status = group.ExpireGroupingRuleStatusStaleGroup
+				return nil, nil
+			}
+			return nil, fmt.Errorf("find group for expiry: %w", findGroupErr)
+		}
+
+		if doc.GroupingRule.ExpiredAt != nil {
+			if deleteErr := r.deleteExpiryTaskByID(sessionCtx, input.TaskID); deleteErr != nil {
+				return nil, deleteErr
+			}
+			status = group.ExpireGroupingRuleStatusAlreadyExpired
+			return nil, nil
+		}
+
+		currentBucket := group.ExpirationBucketFor(doc.GroupingRule.ExpirationDate, bucketLocation)
+		if currentBucket != input.ExpirationBucket {
+			status = group.ExpireGroupingRuleStatusStaleBucket
+			return nil, nil
+		}
+
+		result, updateErr := r.groups.UpdateOne(sessionCtx,
+			activeGroupFilter(group.GetQuery{WorkspaceID: input.WorkspaceID, GroupID: input.GroupID}),
+			bson.M{"$set": bson.M{
+				"grouping_rule.expired_at": expiredAt,
+				"updated_at":               expiredAt,
+			}},
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("mark grouping rule expired: %w", updateErr)
+		}
+		if result.MatchedCount == 0 {
+			status = group.ExpireGroupingRuleStatusStaleGroup
+			return nil, nil
+		}
+		if deleteErr := r.deleteExpiryTaskByID(sessionCtx, input.TaskID); deleteErr != nil {
+			return nil, deleteErr
+		}
+		status = group.ExpireGroupingRuleStatusExpired
+		return nil, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
 func groupIndexModels() []mongo.IndexModel {
 	return []mongo.IndexModel{
 		{
@@ -434,6 +508,30 @@ func (r *MongoGroupRepository) activeGroupExists(ctx context.Context, query grou
 		return false, fmt.Errorf("find active group: %w", err)
 	}
 	return true, nil
+}
+
+func (r *MongoGroupRepository) findExpiryTask(ctx context.Context, input group.ExpireGroupingRuleCommand) (*expiryTaskDocument, error) {
+	var doc expiryTaskDocument
+	err := r.expiryTasks.FindOne(ctx, bson.M{
+		"_id":               input.TaskID,
+		"workspace_id":      input.WorkspaceID,
+		"group_id":          input.GroupID,
+		"expiration_bucket": input.ExpirationBucket,
+	}).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find group expiry task: %w", err)
+	}
+	return &doc, nil
+}
+
+func (r *MongoGroupRepository) deleteExpiryTaskByID(ctx context.Context, taskID string) error {
+	if _, err := r.expiryTasks.DeleteOne(ctx, bson.M{"_id": taskID}); err != nil {
+		return fmt.Errorf("delete group expiry task: %w", err)
+	}
+	return nil
 }
 
 func activeIndividualMemberFilter(groupID string, ntAccount string) bson.M {
