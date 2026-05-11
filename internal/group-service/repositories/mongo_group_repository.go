@@ -14,22 +14,26 @@ import (
 )
 
 const (
-	groupCollectionName                      = "groups"
-	groupIndividualMemberCollectionName      = "group_individual_members"
-	groupExpiryTaskCollectionName            = "group_expiry_task"
-	groupsActiveNameUniqueIndexName          = "groups_active_workspace_normalized_name_unique"
-	groupsWorkspaceCreatedIndexName          = "groups_workspace_created_id"
-	membersActiveGroupAccountUniqueIndexName = "group_individual_members_active_group_account_unique"
-	membersGroupCreatedIndexName             = "group_individual_members_group_created_id"
-	expiryTasksActiveGroupUniqueIndexName    = "group_expiry_task_active_workspace_group_unique"
-	expiryTasksBucketIndexName               = "group_expiry_task_bucket_id"
+	groupCollectionName                                    = "groups"
+	groupIndividualMemberCollectionName                    = "group_individual_members"
+	groupExpiryTaskCollectionName                          = "group_expiry_task"
+	individualMemberExpiryTaskCollectionName               = "individual_member_expiry_task"
+	groupsActiveNameUniqueIndexName                        = "groups_active_workspace_normalized_name_unique"
+	groupsWorkspaceCreatedIndexName                        = "groups_workspace_created_id"
+	membersActiveGroupAccountUniqueIndexName               = "group_individual_members_active_group_account_unique"
+	membersGroupCreatedIndexName                           = "group_individual_members_group_created_id"
+	expiryTasksActiveGroupUniqueIndexName                  = "group_expiry_task_active_workspace_group_unique"
+	expiryTasksBucketIndexName                             = "group_expiry_task_bucket_id"
+	individualMemberExpiryTasksActiveMemberUniqueIndexName = "individual_member_expiry_task_active_group_account_unique"
+	individualMemberExpiryTasksBucketIndexName             = "individual_member_expiry_task_bucket_id"
 )
 
 type MongoGroupRepository struct {
-	client      *mongo.Client
-	groups      *mongo.Collection
-	members     *mongo.Collection
-	expiryTasks *mongo.Collection
+	client            *mongo.Client
+	groups            *mongo.Collection
+	members           *mongo.Collection
+	expiryTasks       *mongo.Collection
+	memberExpiryTasks *mongo.Collection
 }
 
 type groupDocument struct {
@@ -62,6 +66,7 @@ type individualMemberDocument struct {
 	GroupID        string     `bson:"group_id"`
 	NTAccount      string     `bson:"nt_account"`
 	ExpirationDate time.Time  `bson:"expiration_date"`
+	ExpiredAt      *time.Time `bson:"expired_at"`
 	CreatedAt      time.Time  `bson:"created_at"`
 	UpdatedAt      time.Time  `bson:"updated_at"`
 	DeletedAt      *time.Time `bson:"deleted_at"`
@@ -74,12 +79,20 @@ type expiryTaskDocument struct {
 	ExpirationBucket string `bson:"expiration_bucket"`
 }
 
+type individualMemberExpiryTaskDocument struct {
+	ID               string `bson:"_id"`
+	GroupID          string `bson:"group_id"`
+	NTAccount        string `bson:"nt_account"`
+	ExpirationBucket string `bson:"expiration_bucket"`
+}
+
 func NewMongoGroupRepository(client *mongo.Client, db *mongo.Database) *MongoGroupRepository {
 	return &MongoGroupRepository{
-		client:      client,
-		groups:      db.Collection(groupCollectionName),
-		members:     db.Collection(groupIndividualMemberCollectionName),
-		expiryTasks: db.Collection(groupExpiryTaskCollectionName),
+		client:            client,
+		groups:            db.Collection(groupCollectionName),
+		members:           db.Collection(groupIndividualMemberCollectionName),
+		expiryTasks:       db.Collection(groupExpiryTaskCollectionName),
+		memberExpiryTasks: db.Collection(individualMemberExpiryTaskCollectionName),
 	}
 }
 
@@ -92,6 +105,9 @@ func (r *MongoGroupRepository) EnsureIndexes(ctx context.Context) error {
 	}
 	if _, err := r.expiryTasks.Indexes().CreateMany(ctx, groupExpiryTaskIndexModels()); err != nil {
 		return fmt.Errorf("create group expiry task indexes: %w", err)
+	}
+	if _, err := r.memberExpiryTasks.Indexes().CreateMany(ctx, individualMemberExpiryTaskIndexModels()); err != nil {
+		return fmt.Errorf("create individual member expiry task indexes: %w", err)
 	}
 	return nil
 }
@@ -490,6 +506,27 @@ func groupExpiryTaskIndexModels() []mongo.IndexModel {
 	}
 }
 
+func individualMemberExpiryTaskIndexModels() []mongo.IndexModel {
+	return []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{Key: "group_id", Value: 1},
+				{Key: "nt_account", Value: 1},
+			},
+			Options: options.Index().
+				SetName(individualMemberExpiryTasksActiveMemberUniqueIndexName).
+				SetUnique(true),
+		},
+		{
+			Keys: bson.D{
+				{Key: "expiration_bucket", Value: 1},
+				{Key: "_id", Value: 1},
+			},
+			Options: options.Index().SetName(individualMemberExpiryTasksBucketIndexName),
+		},
+	}
+}
+
 func activeGroupFilter(query group.GetQuery) bson.M {
 	return bson.M{
 		"_id":          query.GroupID,
@@ -539,6 +576,14 @@ func activeIndividualMemberFilter(groupID string, ntAccount string) bson.M {
 		"group_id":   groupID,
 		"nt_account": ntAccount,
 		"deleted_at": nil,
+	}
+}
+
+func activeUnexpiredIndividualMemberFilter(groupID string) bson.M {
+	return bson.M{
+		"group_id":   groupID,
+		"deleted_at": nil,
+		"expired_at": nil,
 	}
 }
 
@@ -610,6 +655,26 @@ func newExpiryTaskDocument(task group.ExpiryTask) expiryTaskDocument {
 	}
 }
 
+func newIndividualMemberExpiryTaskDocument(task group.IndividualMemberExpiryTask) individualMemberExpiryTaskDocument {
+	return individualMemberExpiryTaskDocument{
+		ID:               task.ID,
+		GroupID:          task.GroupID,
+		NTAccount:        task.NTAccount,
+		ExpirationBucket: task.ExpirationBucket,
+	}
+}
+
+func newIndividualMemberExpiryTaskDocuments(members []group.IndividualMember) []individualMemberExpiryTaskDocument {
+	docs := make([]individualMemberExpiryTaskDocument, 0, len(members))
+	for _, member := range members {
+		if member.ExpiryTask == nil {
+			continue
+		}
+		docs = append(docs, newIndividualMemberExpiryTaskDocument(*member.ExpiryTask))
+	}
+	return docs
+}
+
 func newIndividualMemberDocuments(model group.Group) []individualMemberDocument {
 	docs := make([]individualMemberDocument, 0, len(model.IndividualMembers))
 	for _, member := range model.IndividualMembers {
@@ -618,6 +683,7 @@ func newIndividualMemberDocuments(model group.Group) []individualMemberDocument 
 			GroupID:        member.GroupID,
 			NTAccount:      member.NTAccount,
 			ExpirationDate: member.ExpirationDate,
+			ExpiredAt:      member.ExpiredAt,
 			CreatedAt:      member.CreatedAt,
 			UpdatedAt:      member.UpdatedAt,
 			DeletedAt:      member.DeletedAt,
@@ -632,6 +698,7 @@ func (d individualMemberDocument) toDomain() group.IndividualMember {
 		GroupID:        d.GroupID,
 		NTAccount:      d.NTAccount,
 		ExpirationDate: d.ExpirationDate,
+		ExpiredAt:      d.ExpiredAt,
 		CreatedAt:      d.CreatedAt,
 		UpdatedAt:      d.UpdatedAt,
 		DeletedAt:      d.DeletedAt,

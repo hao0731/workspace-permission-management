@@ -115,6 +115,31 @@ func TestNewIndividualMemberDocuments(t *testing.T) {
 	}
 }
 
+func TestNewIndividualMemberDocumentsIncludesExpiredAtAndTask(t *testing.T) {
+	expiredAt := repositoryTime()
+	model := repositoryGroup()
+	model.IndividualMembers[0].ExpiredAt = &expiredAt
+	model.IndividualMembers[0].ExpiryTask = &group.IndividualMemberExpiryTask{
+		ID:               "member-task-1",
+		GroupID:          "group-1",
+		NTAccount:        "user1",
+		ExpirationBucket: "2026-06-01",
+	}
+
+	docs := newIndividualMemberDocuments(model)
+	if docs[0].ExpiredAt == nil || !docs[0].ExpiredAt.Equal(expiredAt) {
+		t.Fatalf("ExpiredAt = %v, want %s", docs[0].ExpiredAt, expiredAt)
+	}
+
+	taskDocs := newIndividualMemberExpiryTaskDocuments(model.IndividualMembers)
+	if len(taskDocs) != 1 {
+		t.Fatalf("task docs len = %d, want 1", len(taskDocs))
+	}
+	if taskDocs[0].ID != "member-task-1" || taskDocs[0].GroupID != "group-1" || taskDocs[0].NTAccount != "user1" {
+		t.Fatalf("task doc = %+v", taskDocs[0])
+	}
+}
+
 func TestNewExpiryTaskDocument(t *testing.T) {
 	t.Parallel()
 
@@ -126,6 +151,21 @@ func TestNewExpiryTaskDocument(t *testing.T) {
 	})
 
 	if doc.ID != "task-1" || doc.WorkspaceID != "workspace-1" || doc.GroupID != "group-1" || doc.ExpirationBucket != "2026-05-10" {
+		t.Fatalf("doc = %+v", doc)
+	}
+}
+
+func TestNewIndividualMemberExpiryTaskDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := newIndividualMemberExpiryTaskDocument(group.IndividualMemberExpiryTask{
+		ID:               "member-task-1",
+		GroupID:          "group-1",
+		NTAccount:        "user1",
+		ExpirationBucket: "2026-05-10",
+	})
+
+	if doc.ID != "member-task-1" || doc.GroupID != "group-1" || doc.NTAccount != "user1" || doc.ExpirationBucket != "2026-05-10" {
 		t.Fatalf("doc = %+v", doc)
 	}
 }
@@ -163,6 +203,18 @@ func TestIndexModels(t *testing.T) {
 	if expiryTaskUniqueOptions.Unique == nil || !*expiryTaskUniqueOptions.Unique {
 		t.Fatal("expiry task unique index Unique = false, want true")
 	}
+
+	memberExpiryTaskIndexes := individualMemberExpiryTaskIndexModels()
+	if len(memberExpiryTaskIndexes) != 2 {
+		t.Fatalf("individual member expiry task indexes len = %d, want 2", len(memberExpiryTaskIndexes))
+	}
+	memberExpiryTaskUniqueOptions := indexOptions(t, memberExpiryTaskIndexes[0])
+	if *memberExpiryTaskUniqueOptions.Name != individualMemberExpiryTasksActiveMemberUniqueIndexName {
+		t.Fatalf("individual member expiry task unique index name = %q, want %q", *memberExpiryTaskUniqueOptions.Name, individualMemberExpiryTasksActiveMemberUniqueIndexName)
+	}
+	if memberExpiryTaskUniqueOptions.Unique == nil || !*memberExpiryTaskUniqueOptions.Unique {
+		t.Fatal("individual member expiry task unique index Unique = false, want true")
+	}
 }
 
 func TestActiveGroupFilter(t *testing.T) {
@@ -197,6 +249,15 @@ func TestBuildIndividualMemberListFilter(t *testing.T) {
 func TestActiveIndividualMemberFilter(t *testing.T) {
 	filter := activeIndividualMemberFilter("group-1", "user2")
 	want := bson.M{"group_id": "group-1", "nt_account": "user2", "deleted_at": nil}
+
+	if !reflect.DeepEqual(filter, want) {
+		t.Fatalf("filter = %#v, want %#v", filter, want)
+	}
+}
+
+func TestActiveUnexpiredIndividualMemberFilter(t *testing.T) {
+	filter := activeUnexpiredIndividualMemberFilter("group-1")
+	want := bson.M{"group_id": "group-1", "deleted_at": nil, "expired_at": nil}
 
 	if !reflect.DeepEqual(filter, want) {
 		t.Fatalf("filter = %#v, want %#v", filter, want)
