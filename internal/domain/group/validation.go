@@ -166,6 +166,22 @@ func (command ExpireGroupingRuleCommand) Validate() error {
 	return nil
 }
 
+func (command ExpireIndividualMemberCommand) Validate() error {
+	if command.TaskID == "" {
+		return invalidInput("task id is required")
+	}
+	if command.GroupID == "" {
+		return invalidInput("group id is required")
+	}
+	if err := validateIndividualMemberAccount(command.NTAccount); err != nil {
+		return err
+	}
+	if !IsValidExpirationBucket(command.ExpirationBucket) {
+		return invalidInput("expiration bucket must use yyyy-MM-dd")
+	}
+	return nil
+}
+
 func (rule Rule) Validate() error {
 	if strings.TrimSpace(rule.AttributeKey) == "" {
 		return invalidInput("rule attribute key is required")
@@ -223,7 +239,7 @@ func ParseExpirationBucketLocation(value string) (*time.Location, error) {
 
 	matches := expirationBucketOffsetPattern.FindStringSubmatch(normalized)
 	if matches == nil {
-		return nil, invalidInput("GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE must be UTC or a fixed offset such as UTC+8")
+		return nil, invalidInput("expiration bucket timezone must be UTC or a fixed offset such as UTC+8")
 	}
 
 	hours, err := strconv.Atoi(matches[2])
@@ -238,7 +254,7 @@ func ParseExpirationBucketLocation(value string) (*time.Location, error) {
 		}
 	}
 	if hours > 14 || minutes > 59 {
-		return nil, invalidInput("GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE offset is out of range")
+		return nil, invalidInput("expiration bucket timezone offset is out of range")
 	}
 
 	sign := 1
