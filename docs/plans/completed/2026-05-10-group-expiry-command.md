@@ -66,7 +66,7 @@ No HTTP response DTO should expose `grouping_rule.expired_at` in this phase.
 - Modify: `internal/domain/group/validation.go`
 - Modify: `internal/domain/group/validation_test.go`
 
-- [ ] **Step 1: Add failing domain tests**
+- [x] **Step 1: Add failing domain tests**
 
 Add tests to `internal/domain/group/validation_test.go`:
 
@@ -197,7 +197,7 @@ func TestExpirationBucketFor(t *testing.T) {
 
 Also add `errors`, `strings`, and `time` imports if they are not already present.
 
-- [ ] **Step 2: Run domain tests and verify failure**
+- [x] **Step 2: Run domain tests and verify failure**
 
 Run:
 
@@ -207,7 +207,7 @@ go test ./internal/domain/group
 
 Expected: FAIL because `ExpireGroupingRuleCommand`, `ParseExpirationBucketLocation`, and `ExpirationBucketFor` are undefined.
 
-- [ ] **Step 3: Add domain types**
+- [x] **Step 3: Add domain types**
 
 In `internal/domain/group/group.go`, update `GroupingRule` and add expiry types:
 
@@ -279,7 +279,7 @@ func (command ExpireGroupingRuleCommand) Normalize() ExpireGroupingRuleCommand {
 }
 ```
 
-- [ ] **Step 4: Add bucket parser and validation**
+- [x] **Step 4: Add bucket parser and validation**
 
 In `internal/domain/group/validation.go`, add imports:
 
@@ -372,7 +372,7 @@ func ParseExpirationBucketLocation(value string) (*time.Location, error) {
 
 This helper intentionally accepts an empty string as UTC so callers can use the default when config has already applied defaults.
 
-- [ ] **Step 5: Run domain tests and verify pass**
+- [x] **Step 5: Run domain tests and verify pass**
 
 Run:
 
@@ -382,7 +382,7 @@ go test ./internal/domain/group
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit domain changes**
+- [x] **Step 6: Commit domain changes**
 
 ```bash
 git add internal/domain/group/group.go internal/domain/group/validation.go internal/domain/group/validation_test.go
@@ -398,7 +398,7 @@ git commit -m "feat: add group expiry domain models"
 - Modify: `internal/group-service/config/config_test.go`
 - Modify: `.env.example`
 
-- [ ] **Step 1: Add failing config tests**
+- [x] **Step 1: Add failing config tests**
 
 In `internal/group-service/config/config_test.go`, update the existing happy-path setup helper or test setup to set:
 
@@ -492,7 +492,7 @@ func TestLoadRejectsInvalidGroupExpiryBucketTimezone(t *testing.T) {
 
 Ensure the test file imports `strings` and `time`.
 
-- [ ] **Step 2: Run config tests and verify failure**
+- [x] **Step 2: Run config tests and verify failure**
 
 Run:
 
@@ -502,7 +502,7 @@ go test ./internal/group-service/config
 
 Expected: FAIL because `NATS`, `GroupExpiryCommand`, and related config fields are undefined.
 
-- [ ] **Step 3: Add config structs and loading**
+- [x] **Step 3: Add config structs and loading**
 
 In `internal/group-service/config/config.go`, add the domain import:
 
@@ -611,7 +611,7 @@ if c.GroupExpiryCommand.BucketLocation == nil {
 }
 ```
 
-- [ ] **Step 4: Update `.env.example`**
+- [x] **Step 4: Update `.env.example`**
 
 Add under the group-service MongoDB or validation settings:
 
@@ -626,7 +626,7 @@ GROUP_SERVICE_GROUP_EXPIRY_COMMAND_MAX_WAIT=5s
 GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE=UTC
 ```
 
-- [ ] **Step 5: Run config tests and verify pass**
+- [x] **Step 5: Run config tests and verify pass**
 
 Run:
 
@@ -636,7 +636,7 @@ go test ./internal/group-service/config
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit config changes**
+- [x] **Step 6: Commit config changes**
 
 ```bash
 git add internal/group-service/config/config.go internal/group-service/config/config_test.go .env.example
@@ -651,7 +651,7 @@ git commit -m "feat: add group expiry command config"
 - Create: `internal/group-service/transport/group_expiry_event.go`
 - Create: `internal/group-service/transport/group_expiry_event_test.go`
 
-- [ ] **Step 1: Write failing CloudEvent parser tests**
+- [x] **Step 1: Write failing CloudEvent parser tests**
 
 Create `internal/group-service/transport/group_expiry_event_test.go`:
 
@@ -800,7 +800,7 @@ func mustSetGroupExpiryData(t *testing.T, event *cloudevents.Event, payload grou
 }
 ```
 
-- [ ] **Step 2: Run transport tests and verify failure**
+- [x] **Step 2: Run transport tests and verify failure**
 
 Run:
 
@@ -810,7 +810,7 @@ go test ./internal/group-service/transport
 
 Expected: FAIL because `ParseGroupExpiryCommandEvent` and `groupExpiryCommandData` are undefined.
 
-- [ ] **Step 3: Implement CloudEvent parser**
+- [x] **Step 3: Implement CloudEvent parser**
 
 Create `internal/group-service/transport/group_expiry_event.go`:
 
@@ -881,7 +881,7 @@ func ParseGroupExpiryCommandEvent(data []byte, expectedType string) (group.Expir
 }
 ```
 
-- [ ] **Step 4: Run transport tests and verify pass**
+- [x] **Step 4: Run transport tests and verify pass**
 
 Run:
 
@@ -891,7 +891,7 @@ go test ./internal/group-service/transport
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit transport changes**
+- [x] **Step 5: Commit transport changes**
 
 ```bash
 git add internal/group-service/transport/group_expiry_event.go internal/group-service/transport/group_expiry_event_test.go
@@ -906,7 +906,7 @@ git commit -m "feat: parse group expiry command events"
 - Create: `internal/group-service/handlers/group_expiry_event_handler.go`
 - Create: `internal/group-service/handlers/group_expiry_event_handler_test.go`
 
-- [ ] **Step 1: Write failing handler tests**
+- [x] **Step 1: Write failing handler tests**
 
 Create `internal/group-service/handlers/group_expiry_event_handler_test.go`:
 
@@ -1028,7 +1028,7 @@ func validGroupExpiryMessage(t *testing.T) eventbus.Message {
 }
 ```
 
-- [ ] **Step 2: Run handler tests and verify failure**
+- [x] **Step 2: Run handler tests and verify failure**
 
 Run:
 
@@ -1038,7 +1038,7 @@ go test ./internal/group-service/handlers
 
 Expected: FAIL because `NewGroupExpiryEventHandler` is undefined.
 
-- [ ] **Step 3: Implement command handler**
+- [x] **Step 3: Implement command handler**
 
 Create `internal/group-service/handlers/group_expiry_event_handler.go`:
 
@@ -1112,7 +1112,7 @@ func (h *GroupExpiryEventHandler) Handle(ctx context.Context, msg eventbus.Messa
 }
 ```
 
-- [ ] **Step 4: Run handler tests and verify pass**
+- [x] **Step 4: Run handler tests and verify pass**
 
 Run:
 
@@ -1122,7 +1122,7 @@ go test ./internal/group-service/handlers
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit handler changes**
+- [x] **Step 5: Commit handler changes**
 
 ```bash
 git add internal/group-service/handlers/group_expiry_event_handler.go internal/group-service/handlers/group_expiry_event_handler_test.go
@@ -1137,7 +1137,7 @@ git commit -m "feat: handle group expiry commands"
 - Modify: `internal/group-service/services/group_service.go`
 - Modify: `internal/group-service/services/group_service_test.go`
 
-- [ ] **Step 1: Add failing service tests for create task generation**
+- [x] **Step 1: Add failing service tests for create task generation**
 
 In `internal/group-service/services/group_service_test.go`, add or update fake repository fields:
 
@@ -1223,7 +1223,7 @@ func sequenceGenerator(values ...string) func() string {
 }
 ```
 
-- [ ] **Step 2: Add failing service tests for update and command workflow**
+- [x] **Step 2: Add failing service tests for update and command workflow**
 
 Add tests:
 
@@ -1311,7 +1311,7 @@ func TestGroupServiceExpireGroupingRule(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run service tests and verify failure**
+- [x] **Step 3: Run service tests and verify failure**
 
 Run:
 
@@ -1321,7 +1321,7 @@ go test ./internal/group-service/services
 
 Expected: FAIL because service types and repository interface do not include expiry task behavior.
 
-- [ ] **Step 4: Implement service changes**
+- [x] **Step 4: Implement service changes**
 
 In `internal/group-service/services/group_service.go`, update the repository interface:
 
@@ -1427,7 +1427,7 @@ type UpdateGroupingRuleInput struct {
 }
 ```
 
-- [ ] **Step 5: Run service tests and verify pass**
+- [x] **Step 5: Run service tests and verify pass**
 
 Run:
 
@@ -1437,7 +1437,7 @@ go test ./internal/group-service/services
 
 Expected: PASS.
 
-- [ ] **Step 6: Run domain tests after input struct change**
+- [x] **Step 6: Run domain tests after input struct change**
 
 Run:
 
@@ -1447,7 +1447,7 @@ go test ./internal/domain/group
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit service changes**
+- [x] **Step 7: Commit service changes**
 
 ```bash
 git add internal/domain/group/group.go internal/group-service/services/group_service.go internal/group-service/services/group_service_test.go
@@ -1462,7 +1462,7 @@ git commit -m "feat: generate group expiry tasks in service"
 - Modify: `internal/group-service/repositories/mongo_group_repository.go`
 - Modify: `internal/group-service/repositories/mongo_group_repository_test.go`
 
-- [ ] **Step 1: Add failing repository mapping and index tests**
+- [x] **Step 1: Add failing repository mapping and index tests**
 
 In `internal/group-service/repositories/mongo_group_repository_test.go`, add tests near existing mapping/index tests:
 
@@ -1622,7 +1622,7 @@ func TestMongoGroupRepositoryUpdateGroupingRuleReplacesExpiryTask(t *testing.T) 
 
 If repository integration helpers are gated behind environment variables, keep the new tests under the same gating pattern as existing MongoDB transaction tests.
 
-- [ ] **Step 2: Run repository tests and verify failure**
+- [x] **Step 2: Run repository tests and verify failure**
 
 Run:
 
@@ -1632,7 +1632,7 @@ go test ./internal/group-service/repositories
 
 Expected: FAIL because expiry task document and collection fields are undefined.
 
-- [ ] **Step 3: Add repository schema and collection**
+- [x] **Step 3: Add repository schema and collection**
 
 In `internal/group-service/repositories/mongo_group_repository.go`, add constants:
 
@@ -1740,7 +1740,7 @@ func newExpiryTaskDocument(task group.ExpiryTask) expiryTaskDocument {
 
 Update `groupDocument.toDomain` to set `ExpiredAt: d.GroupingRule.ExpiredAt`.
 
-- [ ] **Step 4: Maintain tasks in create, update, and delete transactions**
+- [x] **Step 4: Maintain tasks in create, update, and delete transactions**
 
 In `Create`, after member inserts:
 
@@ -1788,7 +1788,7 @@ if input.ExpiryTask != nil {
 }
 ```
 
-- [ ] **Step 5: Run repository tests and verify pass**
+- [x] **Step 5: Run repository tests and verify pass**
 
 Run:
 
@@ -1798,7 +1798,7 @@ go test ./internal/group-service/repositories
 
 Expected: PASS. If local MongoDB is unavailable and existing tests skip integration cases, confirm the new integration cases follow the same skip behavior.
 
-- [ ] **Step 6: Commit repository write-path changes**
+- [x] **Step 6: Commit repository write-path changes**
 
 ```bash
 git add internal/group-service/repositories/mongo_group_repository.go internal/group-service/repositories/mongo_group_repository_test.go
@@ -1813,7 +1813,7 @@ git commit -m "feat: persist group expiry tasks"
 - Modify: `internal/group-service/repositories/mongo_group_repository.go`
 - Modify: `internal/group-service/repositories/mongo_group_repository_test.go`
 
-- [ ] **Step 1: Add failing command transaction tests**
+- [x] **Step 1: Add failing command transaction tests**
 
 In `internal/group-service/repositories/mongo_group_repository_test.go`, add tests using the existing Mongo test helper:
 
@@ -2026,7 +2026,7 @@ func insertExpiryTask(t *testing.T, repository *MongoGroupRepository, taskDoc ex
 }
 ```
 
-- [ ] **Step 2: Run repository tests and verify failure**
+- [x] **Step 2: Run repository tests and verify failure**
 
 Run:
 
@@ -2036,7 +2036,7 @@ go test ./internal/group-service/repositories
 
 Expected: FAIL because `ExpireGroupingRule` is undefined or incomplete.
 
-- [ ] **Step 3: Implement repository command transaction**
+- [x] **Step 3: Implement repository command transaction**
 
 In `internal/group-service/repositories/mongo_group_repository.go`, add:
 
@@ -2144,7 +2144,7 @@ func (r *MongoGroupRepository) deleteExpiryTaskByID(ctx context.Context, taskID 
 }
 ```
 
-- [ ] **Step 4: Run repository tests and verify pass**
+- [x] **Step 4: Run repository tests and verify pass**
 
 Run:
 
@@ -2154,7 +2154,7 @@ go test ./internal/group-service/repositories
 
 Expected: PASS. If local MongoDB is unavailable and existing repository tests skip integration cases, record the skip output in the task notes.
 
-- [ ] **Step 5: Commit command transaction changes**
+- [x] **Step 5: Commit command transaction changes**
 
 ```bash
 git add internal/group-service/repositories/mongo_group_repository.go internal/group-service/repositories/mongo_group_repository_test.go
@@ -2169,7 +2169,7 @@ git commit -m "feat: expire grouping rules transactionally"
 - Modify: `cmd/group-service/main.go`
 - Modify: `cmd/group-service/main_test.go`
 
-- [ ] **Step 1: Add failing main/config wiring tests**
+- [x] **Step 1: Add failing main/config wiring tests**
 
 Open `cmd/group-service/main_test.go`. If it already tests `run` failure modes by setting env vars, update required env setup with:
 
@@ -2182,7 +2182,7 @@ t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT", "app.todo.group.expiry.pr
 
 If `main_test.go` only tests small helpers, add a config-loading smoke test in `internal/group-service/config/config_test.go` instead of creating brittle runtime tests. The runtime behavior is mostly covered by `internal/shared/eventbus` tests and handler tests.
 
-- [ ] **Step 2: Run group-service command tests and verify failure**
+- [x] **Step 2: Run group-service command tests and verify failure**
 
 Run:
 
@@ -2192,7 +2192,7 @@ go test ./cmd/group-service ./internal/group-service/config
 
 Expected: FAIL until `cmd/group-service` imports NATS/eventbus and passes the new config through service options.
 
-- [ ] **Step 3: Wire NATS, handler, and consumer**
+- [x] **Step 3: Wire NATS, handler, and consumer**
 
 In `cmd/group-service/main.go`, add imports:
 
@@ -2255,7 +2255,7 @@ go func() {
 
 Keep the existing select logic that stops the context when any goroutine returns an error.
 
-- [ ] **Step 4: Run command package tests and verify pass**
+- [x] **Step 4: Run command package tests and verify pass**
 
 Run:
 
@@ -2265,7 +2265,7 @@ go test ./cmd/group-service ./internal/group-service/config
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit runtime wiring**
+- [x] **Step 5: Commit runtime wiring**
 
 ```bash
 git add cmd/group-service/main.go cmd/group-service/main_test.go internal/group-service/config/config_test.go
@@ -2280,7 +2280,7 @@ git commit -m "feat: wire group expiry command consumer"
 - Verify all files changed by Tasks 1-8.
 - Do not stage `lefthook.yml` unless it was intentionally changed for this feature.
 
-- [ ] **Step 1: Run repository-wide tests**
+- [x] **Step 1: Run repository-wide tests**
 
 Run:
 
@@ -2296,7 +2296,7 @@ go test ./internal/domain/group ./internal/group-service/config ./internal/group
 
 Expected: PASS.
 
-- [ ] **Step 2: Run formatting**
+- [x] **Step 2: Run formatting**
 
 Run:
 
@@ -2306,7 +2306,7 @@ gofmt -w internal/domain/group internal/group-service cmd/group-service
 
 Expected: command exits 0 and produces no non-Go file changes.
 
-- [ ] **Step 3: Run tests again after formatting**
+- [x] **Step 3: Run tests again after formatting**
 
 Run:
 
@@ -2316,7 +2316,7 @@ go test ./...
 
 Expected: PASS or the same documented MongoDB availability skip behavior from Step 1.
 
-- [ ] **Step 4: Inspect final diff**
+- [x] **Step 4: Inspect final diff**
 
 Run:
 
@@ -2331,7 +2331,7 @@ Expected:
 - Diff includes only group expiry command implementation files, `.env.example`, and this plan/design documentation if those were still uncommitted.
 - Diff does not include unrelated `lefthook.yml` edits.
 
-- [ ] **Step 5: Commit final verification adjustments**
+- [x] **Step 5: Commit final verification adjustments**
 
 If formatting or final fixes changed files after the previous task commits:
 
