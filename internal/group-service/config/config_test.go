@@ -20,6 +20,12 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_FETCH_COUNT", "25")
 	t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_MAX_WAIT", "7s")
 	t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE", "UTC+8")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_STREAM", "INDIVIDUAL_MEMBER_EXPIRY")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_DURABLE", "group-service-individual-member-expiry")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT", "app.todo.group.individual-member.expiry.process")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_FETCH_COUNT", "30")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_MAX_WAIT", "9s")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE", "UTC+8")
 	t.Setenv("GROUP_SERVICE_SHUTDOWN_TIMEOUT", "15s")
 	t.Setenv("GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS", "250")
 	t.Setenv("GROUP_SERVICE_MAX_GROUPING_RULES", "5")
@@ -64,6 +70,27 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	if cfg.GroupExpiryCommand.BucketLocation == nil || cfg.GroupExpiryCommand.BucketLocation.String() != "UTC+08:00" {
 		t.Fatalf("BucketLocation = %v, want UTC+08:00", cfg.GroupExpiryCommand.BucketLocation)
 	}
+	if cfg.IndividualMemberExpiryCommand.Stream != "INDIVIDUAL_MEMBER_EXPIRY" {
+		t.Fatalf("IndividualMemberExpiryCommand.Stream = %q, want INDIVIDUAL_MEMBER_EXPIRY", cfg.IndividualMemberExpiryCommand.Stream)
+	}
+	if cfg.IndividualMemberExpiryCommand.Durable != "group-service-individual-member-expiry" {
+		t.Fatalf("IndividualMemberExpiryCommand.Durable = %q, want group-service-individual-member-expiry", cfg.IndividualMemberExpiryCommand.Durable)
+	}
+	if cfg.IndividualMemberExpiryCommand.Subject != "app.todo.group.individual-member.expiry.process" {
+		t.Fatalf("IndividualMemberExpiryCommand.Subject = %q, want app.todo.group.individual-member.expiry.process", cfg.IndividualMemberExpiryCommand.Subject)
+	}
+	if cfg.IndividualMemberExpiryCommand.FetchCount != 30 {
+		t.Fatalf("IndividualMemberExpiryCommand.FetchCount = %d, want 30", cfg.IndividualMemberExpiryCommand.FetchCount)
+	}
+	if cfg.IndividualMemberExpiryCommand.MaxWait != 9*time.Second {
+		t.Fatalf("IndividualMemberExpiryCommand.MaxWait = %s, want 9s", cfg.IndividualMemberExpiryCommand.MaxWait)
+	}
+	if cfg.IndividualMemberExpiryCommand.BucketTimezone != "UTC+8" {
+		t.Fatalf("IndividualMemberExpiryCommand.BucketTimezone = %q, want UTC+8", cfg.IndividualMemberExpiryCommand.BucketTimezone)
+	}
+	if cfg.IndividualMemberExpiryCommand.BucketLocation == nil || cfg.IndividualMemberExpiryCommand.BucketLocation.String() != "UTC+08:00" {
+		t.Fatalf("IndividualMemberExpiryCommand.BucketLocation = %v, want UTC+08:00", cfg.IndividualMemberExpiryCommand.BucketLocation)
+	}
 	if cfg.ShutdownTimeout != 15*time.Second {
 		t.Fatalf("ShutdownTimeout = %s, want 15s", cfg.ShutdownTimeout)
 	}
@@ -102,6 +129,15 @@ func TestLoadAppliesOptionalDefaults(t *testing.T) {
 	}
 	if cfg.GroupExpiryCommand.BucketTimezone != "UTC" {
 		t.Fatalf("GroupExpiryCommand.BucketTimezone = %q, want UTC", cfg.GroupExpiryCommand.BucketTimezone)
+	}
+	if cfg.IndividualMemberExpiryCommand.FetchCount != 20 {
+		t.Fatalf("IndividualMemberExpiryCommand.FetchCount = %d, want 20", cfg.IndividualMemberExpiryCommand.FetchCount)
+	}
+	if cfg.IndividualMemberExpiryCommand.MaxWait != 5*time.Second {
+		t.Fatalf("IndividualMemberExpiryCommand.MaxWait = %s, want 5s", cfg.IndividualMemberExpiryCommand.MaxWait)
+	}
+	if cfg.IndividualMemberExpiryCommand.BucketTimezone != "UTC" {
+		t.Fatalf("IndividualMemberExpiryCommand.BucketTimezone = %q, want UTC", cfg.IndividualMemberExpiryCommand.BucketTimezone)
 	}
 }
 
@@ -179,6 +215,26 @@ func TestLoadRejectsInvalidGroupExpiryBucketTimezone(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsMissingIndividualMemberExpiryCommandConfig(t *testing.T) {
+	setRequiredGroupServiceConfig(t)
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT", " ")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT is required") {
+		t.Fatalf("Load() error = %v, want missing subject", err)
+	}
+}
+
+func TestLoadRejectsInvalidIndividualMemberExpiryBucketTimezone(t *testing.T) {
+	setRequiredGroupServiceConfig(t)
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE", "Asia/Taipei")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE") {
+		t.Fatalf("Load() error = %v, want invalid timezone", err)
+	}
+}
+
 func setRequiredGroupServiceConfig(t *testing.T) {
 	t.Helper()
 
@@ -189,4 +245,7 @@ func setRequiredGroupServiceConfig(t *testing.T) {
 	t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM", "GROUP_EXPIRY")
 	t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE", "group-service-expiry")
 	t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT", "app.todo.group.expiry.process")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_STREAM", "INDIVIDUAL_MEMBER_EXPIRY")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_DURABLE", "group-service-individual-member-expiry")
+	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT", "app.todo.group.individual-member.expiry.process")
 }

@@ -81,10 +81,16 @@ func run() error {
 			cfg.Validation.MaxGroupingRules,
 		),
 		services.WithGroupExpiryBucketLocation(cfg.GroupExpiryCommand.BucketLocation),
+		services.WithIndividualMemberExpiryBucketLocation(cfg.IndividualMemberExpiryCommand.BucketLocation),
 	)
 
 	eventHandler := handlers.NewGroupExpiryEventHandler(groupService, cfg.GroupExpiryCommand.Subject, logger)
 	consumer, err := eventbus.NewJetStreamConsumer(ctx, nc, newGroupExpiryEventbusConfig(cfg), eventHandler, logger)
+	if err != nil {
+		return err
+	}
+	individualMemberExpiryEventHandler := handlers.NewIndividualMemberExpiryEventHandler(groupService, cfg.IndividualMemberExpiryCommand.Subject, logger)
+	individualMemberExpiryConsumer, err := eventbus.NewJetStreamConsumer(ctx, nc, newIndividualMemberExpiryEventbusConfig(cfg), individualMemberExpiryEventHandler, logger)
 	if err != nil {
 		return err
 	}
@@ -93,7 +99,7 @@ func run() error {
 	registerHealthRoutes(e)
 	handlers.RegisterRoutes(e, handlers.NewGroupHandler(groupService, logger, pagination.New()))
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() {
 		startConfig := echo.StartConfig{
 			Address:         cfg.HTTPAddr,
@@ -107,6 +113,9 @@ func run() error {
 	}()
 	go func() {
 		errCh <- consumer.Run(ctx)
+	}()
+	go func() {
+		errCh <- individualMemberExpiryConsumer.Run(ctx)
 	}()
 
 	select {
@@ -127,6 +136,16 @@ func newGroupExpiryEventbusConfig(cfg config.Config) eventbus.Config {
 		Durable:   cfg.GroupExpiryCommand.Durable,
 		BatchSize: cfg.GroupExpiryCommand.FetchCount,
 		MaxWait:   cfg.GroupExpiryCommand.MaxWait,
+	}
+}
+
+func newIndividualMemberExpiryEventbusConfig(cfg config.Config) eventbus.Config {
+	return eventbus.Config{
+		Stream:    cfg.IndividualMemberExpiryCommand.Stream,
+		Subjects:  []string{cfg.IndividualMemberExpiryCommand.Subject},
+		Durable:   cfg.IndividualMemberExpiryCommand.Durable,
+		BatchSize: cfg.IndividualMemberExpiryCommand.FetchCount,
+		MaxWait:   cfg.IndividualMemberExpiryCommand.MaxWait,
 	}
 }
 
