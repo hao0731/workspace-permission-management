@@ -3,9 +3,15 @@ package group
 import (
 	"fmt"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
+
+const expirationBucketLayout = "2006-01-02"
+
+var expirationBucketOffsetPattern = regexp.MustCompile(`^UTC([+-])(\d{1,2})(?::?(\d{2}))?$`)
 
 func (input CreateInput) Validate(now time.Time, opts ...ValidateOption) error {
 	options := defaultValidateOptions()
@@ -144,6 +150,22 @@ func (input DeleteIndividualMemberInput) Validate() error {
 	return validateIndividualMemberAccount(input.NTAccount)
 }
 
+func (command ExpireGroupingRuleCommand) Validate() error {
+	if command.TaskID == "" {
+		return invalidInput("task id is required")
+	}
+	if command.WorkspaceID == "" {
+		return invalidInput("workspace id is required")
+	}
+	if command.GroupID == "" {
+		return invalidInput("group id is required")
+	}
+	if !IsValidExpirationBucket(command.ExpirationBucket) {
+		return invalidInput("expiration bucket must use yyyy-MM-dd")
+	}
+	return nil
+}
+
 func (rule Rule) Validate() error {
 	if strings.TrimSpace(rule.AttributeKey) == "" {
 		return invalidInput("rule attribute key is required")
@@ -179,6 +201,53 @@ func IsValidOperator(operator Operator) bool {
 	default:
 		return false
 	}
+}
+
+func IsValidExpirationBucket(value string) bool {
+	parsed, err := time.Parse(expirationBucketLayout, value)
+	return err == nil && parsed.Format(expirationBucketLayout) == value
+}
+
+func ExpirationBucketFor(expiration time.Time, location *time.Location) string {
+	if location == nil {
+		location = time.UTC
+	}
+	return expiration.In(location).Format(expirationBucketLayout)
+}
+
+func ParseExpirationBucketLocation(value string) (*time.Location, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	if normalized == "" || normalized == "UTC" {
+		return time.UTC, nil
+	}
+
+	matches := expirationBucketOffsetPattern.FindStringSubmatch(normalized)
+	if matches == nil {
+		return nil, invalidInput("GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE must be UTC or a fixed offset such as UTC+8")
+	}
+
+	hours, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid timezone hour offset", ErrInvalidInput)
+	}
+	minutes := 0
+	if matches[3] != "" {
+		minutes, err = strconv.Atoi(matches[3])
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid timezone minute offset", ErrInvalidInput)
+		}
+	}
+	if hours > 14 || minutes > 59 {
+		return nil, invalidInput("GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE offset is out of range")
+	}
+
+	sign := 1
+	if matches[1] == "-" {
+		sign = -1
+	}
+	totalSeconds := sign * ((hours * 60 * 60) + (minutes * 60))
+	name := fmt.Sprintf("UTC%s%02d:%02d", matches[1], hours, minutes)
+	return time.FixedZone(name, totalSeconds), nil
 }
 
 func validateIndividualMembers(members []IndividualMember, now time.Time) error {

@@ -29,6 +29,7 @@ type Group struct {
 	Description       string
 	GroupingRule      GroupingRule
 	IndividualMembers []IndividualMember
+	ExpiryTask        *ExpiryTask
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
@@ -57,12 +58,38 @@ type UpdateGroupingRuleInput struct {
 	GroupID        string
 	Rules          []Rule
 	ExpirationDate time.Time
+	ExpiryTask     *ExpiryTask
 }
 
 type GroupingRule struct {
 	Rules          []Rule
 	ExpirationDate time.Time
+	ExpiredAt      *time.Time
 }
+
+type ExpiryTask struct {
+	ID               string
+	WorkspaceID      string
+	GroupID          string
+	ExpirationBucket string
+}
+
+type ExpireGroupingRuleCommand struct {
+	TaskID           string
+	WorkspaceID      string
+	GroupID          string
+	ExpirationBucket string
+}
+
+type ExpireGroupingRuleStatus string
+
+const (
+	ExpireGroupingRuleStatusExpired        ExpireGroupingRuleStatus = "expired"
+	ExpireGroupingRuleStatusStaleTask      ExpireGroupingRuleStatus = "stale_task"
+	ExpireGroupingRuleStatusStaleGroup     ExpireGroupingRuleStatus = "stale_group"
+	ExpireGroupingRuleStatusAlreadyExpired ExpireGroupingRuleStatus = "already_expired"
+	ExpireGroupingRuleStatusStaleBucket    ExpireGroupingRuleStatus = "stale_bucket"
+)
 
 type Rule struct {
 	AttributeKey string
@@ -198,6 +225,22 @@ func (rule GroupingRule) Normalize() GroupingRule {
 		rule.Rules[i] = rule.Rules[i].Normalize()
 	}
 	return rule
+}
+
+func (task ExpiryTask) Normalize() ExpiryTask {
+	task.ID = strings.TrimSpace(task.ID)
+	task.WorkspaceID = strings.TrimSpace(task.WorkspaceID)
+	task.GroupID = strings.TrimSpace(task.GroupID)
+	task.ExpirationBucket = strings.TrimSpace(task.ExpirationBucket)
+	return task
+}
+
+func (command ExpireGroupingRuleCommand) Normalize() ExpireGroupingRuleCommand {
+	command.TaskID = strings.TrimSpace(command.TaskID)
+	command.WorkspaceID = strings.TrimSpace(command.WorkspaceID)
+	command.GroupID = strings.TrimSpace(command.GroupID)
+	command.ExpirationBucket = strings.TrimSpace(command.ExpirationBucket)
+	return command
 }
 
 func (rule Rule) Normalize() Rule {
