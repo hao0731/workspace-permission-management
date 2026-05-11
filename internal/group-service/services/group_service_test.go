@@ -18,10 +18,13 @@ type fakeGroupRepository struct {
 	addInput        group.AddIndividualMembersInput
 	memberUpdate    group.UpdateIndividualMemberExpirationInput
 	memberDelete    group.DeleteIndividualMemberInput
+	expireInput     group.ExpireGroupingRuleCommand
 	model           *group.Group
 	page            group.IndividualMemberPage
 	addedMembers    []group.IndividualMember
+	expireStatus    group.ExpireGroupingRuleStatus
 	err             error
+	expireErr       error
 	calls           int
 	getCalls        int
 	deleteCalls     int
@@ -34,6 +37,8 @@ type fakeGroupRepository struct {
 	updateTimestamp time.Time
 	memberUpdTime   time.Time
 	memberDelTime   time.Time
+	expiredAt       time.Time
+	expireLocation  *time.Location
 }
 
 func (f *fakeGroupRepository) Create(ctx context.Context, input group.Group) (group.Group, error) {
@@ -103,6 +108,16 @@ func (f *fakeGroupRepository) DeleteIndividualMember(ctx context.Context, input 
 	return f.err
 }
 
+func (f *fakeGroupRepository) ExpireGroupingRule(ctx context.Context, input group.ExpireGroupingRuleCommand, expiredAt time.Time, bucketLocation *time.Location) (group.ExpireGroupingRuleStatus, error) {
+	f.expireInput = input
+	f.expiredAt = expiredAt
+	f.expireLocation = bucketLocation
+	if f.expireStatus == "" {
+		f.expireStatus = group.ExpireGroupingRuleStatusExpired
+	}
+	return f.expireStatus, f.expireErr
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
 }
@@ -134,7 +149,7 @@ func validServiceCreateInput() group.CreateInput {
 
 func TestGroupServiceCreateGroup(t *testing.T) {
 	repository := &fakeGroupRepository{}
-	ids := []string{"group-1", "member-1"}
+	ids := []string{"group-1", "member-1", "task-1"}
 	service := NewGroupService(repository,
 		WithGroupClock(fixedNow),
 		WithGroupIDGenerator(func() string {
@@ -171,6 +186,46 @@ func TestGroupServiceCreateGroup(t *testing.T) {
 	}
 	if !model.CreatedAt.Equal(fixedNow()) || !model.UpdatedAt.Equal(fixedNow()) {
 		t.Fatalf("timestamps = %s/%s, want fixed now", model.CreatedAt, model.UpdatedAt)
+	}
+}
+
+func TestGroupServiceCreateGroupCreatesExpiryTask(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{}
+	now := time.Date(2026, 5, 10, 16, 30, 0, 0, time.UTC)
+	location, err := group.ParseExpirationBucketLocation("UTC+8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewGroupService(repository,
+		WithGroupIDGenerator(sequenceGenerator("group-1", "task-1")),
+		WithGroupClock(func() time.Time { return now }),
+		WithGroupExpiryBucketLocation(location),
+	)
+
+	_, err = service.CreateGroup(context.Background(), group.CreateInput{
+		WorkspaceID: "workspace-1",
+		Name:        "Reviewers",
+		GroupingRule: group.GroupingRule{
+			Rules:          []group.Rule{{AttributeKey: "department", Operator: group.OperatorEq, Value: "ABCD-123"}},
+			ExpirationDate: now.Add(24 * time.Hour),
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateGroup() error = %v", err)
+	}
+	if repository.input.ExpiryTask == nil {
+		t.Fatal("created group expiry task is nil")
+	}
+	if repository.input.ExpiryTask.ID != "task-1" {
+		t.Fatalf("task id = %q, want task-1", repository.input.ExpiryTask.ID)
+	}
+	if repository.input.ExpiryTask.ExpirationBucket != "2026-05-12" {
+		t.Fatalf("expiration bucket = %q, want 2026-05-12", repository.input.ExpiryTask.ExpirationBucket)
+	}
+	if repository.input.GroupingRule.ExpiredAt != nil {
+		t.Fatalf("expired_at = %v, want nil", repository.input.GroupingRule.ExpiredAt)
 	}
 }
 
@@ -332,6 +387,88 @@ func TestGroupServiceUpdateGroupingRule(t *testing.T) {
 	}
 	if !repository.updateTimestamp.Equal(fixedNow()) {
 		t.Fatalf("updatedAt = %s, want fixed now", repository.updateTimestamp)
+	}
+}
+
+func TestGroupServiceUpdateGroupingRuleCreatesExpiryTask(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{}
+	now := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	service := NewGroupService(repository,
+		WithGroupIDGenerator(sequenceGenerator("task-1")),
+		WithGroupClock(func() time.Time { return now }),
+	)
+
+	err := service.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		Rules:          []group.Rule{{AttributeKey: "department", Operator: group.OperatorEq, Value: "ABCD-123"}},
+		ExpirationDate: now.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("UpdateGroupingRule() error = %v", err)
+	}
+	if repository.updateInput.ExpiryTask == nil {
+		t.Fatal("updated grouping rule expiry task is nil")
+	}
+	if repository.updateInput.ExpiryTask.ID != "task-1" {
+		t.Fatalf("task id = %q, want task-1", repository.updateInput.ExpiryTask.ID)
+	}
+}
+
+func TestGroupServiceUpdateGroupingRuleWithoutRulesClearsExpiryTask(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{}
+	now := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	service := NewGroupService(repository, WithGroupClock(func() time.Time { return now }))
+
+	err := service.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		Rules:          []group.Rule{},
+		ExpirationDate: now.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("UpdateGroupingRule() error = %v", err)
+	}
+	if repository.updateInput.ExpiryTask != nil {
+		t.Fatalf("expiry task = %+v, want nil", repository.updateInput.ExpiryTask)
+	}
+}
+
+func TestGroupServiceExpireGroupingRule(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{expireStatus: group.ExpireGroupingRuleStatusStaleTask}
+	now := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	location, err := group.ParseExpirationBucketLocation("UTC+8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewGroupService(repository,
+		WithGroupClock(func() time.Time { return now }),
+		WithGroupExpiryBucketLocation(location),
+	)
+
+	status, err := service.ExpireGroupingRule(context.Background(), group.ExpireGroupingRuleCommand{
+		TaskID:           "task-1",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-05-10",
+	})
+	if err != nil {
+		t.Fatalf("ExpireGroupingRule() error = %v", err)
+	}
+	if status != group.ExpireGroupingRuleStatusStaleTask {
+		t.Fatalf("status = %s, want stale_task", status)
+	}
+	if !repository.expiredAt.Equal(now) {
+		t.Fatalf("expiredAt = %s, want %s", repository.expiredAt, now)
+	}
+	if repository.expireLocation.String() != "UTC+08:00" {
+		t.Fatalf("location = %s, want UTC+08:00", repository.expireLocation)
 	}
 }
 
@@ -519,5 +656,17 @@ func TestGroupServiceDeleteIndividualMemberValidationFailureDoesNotCallRepositor
 	}
 	if repository.memberDelCalls != 0 {
 		t.Fatalf("member delete calls = %d, want 0", repository.memberDelCalls)
+	}
+}
+
+func sequenceGenerator(values ...string) func() string {
+	index := 0
+	return func() string {
+		if index >= len(values) {
+			return values[len(values)-1]
+		}
+		value := values[index]
+		index++
+		return value
 	}
 }
