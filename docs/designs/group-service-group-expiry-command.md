@@ -43,7 +43,7 @@ Policy alignment:
 - Do not design the scheduler or dispatcher that scans `group_expiry_task` and publishes command events.
 - Do not expose `expired_at` in the public HTTP group response in this phase.
 - Do not evaluate employee attributes or materialize group membership.
-- Do not expire explicit individual members; individual member expiration remains a separate field-level concern.
+- Do not expire explicit individual members; individual-member expiration is handled by [Group Individual Member Expiry Command Design](group-service-individual-member-expiry-command.md).
 - Do not add frontend changes.
 
 ## Expiry Task Lifecycle
