@@ -21,6 +21,7 @@ type GroupRepository interface {
 	UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput, updatedAt time.Time) error
 	DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput, deletedAt time.Time) error
 	ExpireGroupingRule(ctx context.Context, input group.ExpireGroupingRuleCommand, expiredAt time.Time, bucketLocation *time.Location) (group.ExpireGroupingRuleStatus, error)
+	ExpireIndividualMember(ctx context.Context, input group.ExpireIndividualMemberCommand, expiredAt time.Time, bucketLocation *time.Location) (group.ExpireIndividualMemberStatus, error)
 }
 
 type GroupOption func(*GroupService)
@@ -58,19 +59,29 @@ func WithGroupExpiryBucketLocation(location *time.Location) GroupOption {
 	}
 }
 
+func WithIndividualMemberExpiryBucketLocation(location *time.Location) GroupOption {
+	return func(s *GroupService) {
+		if location != nil {
+			s.individualMemberExpiryBucketLocation = location
+		}
+	}
+}
+
 type GroupService struct {
-	repository           GroupRepository
-	idGenerator          func() string
-	now                  func() time.Time
-	expiryBucketLocation *time.Location
-	validateOptions      []group.ValidateOption
+	repository                           GroupRepository
+	idGenerator                          func() string
+	now                                  func() time.Time
+	expiryBucketLocation                 *time.Location
+	individualMemberExpiryBucketLocation *time.Location
+	validateOptions                      []group.ValidateOption
 }
 
 func NewGroupService(repository GroupRepository, opts ...GroupOption) *GroupService {
 	service := &GroupService{
-		repository:           repository,
-		idGenerator:          uuid.NewString,
-		expiryBucketLocation: time.UTC,
+		repository:                           repository,
+		idGenerator:                          uuid.NewString,
+		expiryBucketLocation:                 time.UTC,
+		individualMemberExpiryBucketLocation: time.UTC,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -168,6 +179,18 @@ func (s *GroupService) ExpireGroupingRule(ctx context.Context, input group.Expir
 	return status, nil
 }
 
+func (s *GroupService) ExpireIndividualMember(ctx context.Context, input group.ExpireIndividualMemberCommand) (group.ExpireIndividualMemberStatus, error) {
+	input = input.Normalize()
+	if err := input.Validate(); err != nil {
+		return "", err
+	}
+	status, err := s.repository.ExpireIndividualMember(ctx, input, s.now().UTC(), s.individualMemberExpiryBucketLocation)
+	if err != nil {
+		return "", fmt.Errorf("expire individual member: %w", err)
+	}
+	return status, nil
+}
+
 func (s *GroupService) ListIndividualMembers(ctx context.Context, query group.ListIndividualMembersQuery) (group.IndividualMemberPage, error) {
 	query = query.Normalize()
 	if err := query.Validate(); err != nil {
@@ -203,6 +226,7 @@ func (s *GroupService) UpdateIndividualMemberExpiration(ctx context.Context, inp
 	if err := input.Validate(now); err != nil {
 		return err
 	}
+	input.ExpiryTask = s.newIndividualMemberExpiryTask(input.GroupID, input.NTAccount, input.ExpirationDate)
 	if err := s.repository.UpdateIndividualMemberExpiration(ctx, input, now); err != nil {
 		if errors.Is(err, group.ErrNotFound) {
 			return err
@@ -226,16 +250,28 @@ func (s *GroupService) DeleteIndividualMember(ctx context.Context, input group.D
 func (s *GroupService) newIndividualMembers(groupID string, input []group.IndividualMember, now time.Time) []group.IndividualMember {
 	members := make([]group.IndividualMember, 0, len(input))
 	for _, member := range input {
+		ntAccount := member.NTAccount
 		members = append(members, group.IndividualMember{
 			ID:             s.idGenerator(),
 			GroupID:        groupID,
-			NTAccount:      member.NTAccount,
+			NTAccount:      ntAccount,
 			ExpirationDate: member.ExpirationDate,
+			ExpiredAt:      nil,
+			ExpiryTask:     s.newIndividualMemberExpiryTask(groupID, ntAccount, member.ExpirationDate),
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		})
 	}
 	return members
+}
+
+func (s *GroupService) newIndividualMemberExpiryTask(groupID string, ntAccount string, expiration time.Time) *group.IndividualMemberExpiryTask {
+	return &group.IndividualMemberExpiryTask{
+		ID:               s.idGenerator(),
+		GroupID:          groupID,
+		NTAccount:        ntAccount,
+		ExpirationBucket: group.ExpirationBucketFor(expiration, s.individualMemberExpiryBucketLocation),
+	}
 }
 
 func (s *GroupService) newExpiryTask(workspaceID string, groupID string, groupingRule group.GroupingRule) *group.ExpiryTask {

@@ -157,6 +157,7 @@ type UpdateIndividualMemberExpirationInput struct {
 	GroupID        string
 	NTAccount      string
 	ExpirationDate time.Time
+	ExpiryTask     *IndividualMemberExpiryTask
 }
 
 type DeleteIndividualMemberInput struct {
