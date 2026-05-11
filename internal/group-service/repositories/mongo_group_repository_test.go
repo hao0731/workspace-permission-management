@@ -958,13 +958,7 @@ func TestMongoGroupRepositoryExpireGroupingRuleExpiresAndDeletesTaskIntegration(
 }
 
 func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.T) {
-	tests := []struct {
-		name      string
-		setup     func(t *testing.T, repository *MongoGroupRepository)
-		command   group.ExpireGroupingRuleCommand
-		want      group.ExpireGroupingRuleStatus
-		wantTasks int64
-	}{
+	tests := []repositoryExpiryStaleCase[group.ExpireGroupingRuleCommand, group.ExpireGroupingRuleStatus]{
 		{
 			name: "missing task",
 			command: group.ExpireGroupingRuleCommand{
@@ -1053,6 +1047,219 @@ func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.
 		},
 	}
 
+	runRepositoryExpiryStaleCases(t, tests,
+		func(ctx context.Context, repository *MongoGroupRepository, command group.ExpireGroupingRuleCommand, expiredAt time.Time, location *time.Location) (group.ExpireGroupingRuleStatus, error) {
+			return repository.ExpireGroupingRule(ctx, command, expiredAt, location)
+		},
+		func(ctx context.Context, repository *MongoGroupRepository, command group.ExpireGroupingRuleCommand) (int64, error) {
+			return repository.expiryTasks.CountDocuments(ctx, bson.M{"_id": command.TaskID})
+		},
+	)
+}
+
+func TestMongoGroupRepositoryExpireIndividualMemberExpiresAndDeletesTaskIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+
+	ctx := context.Background()
+	now := repositoryTime()
+	expiration := time.Date(2026, 5, 10, 16, 30, 0, 0, time.UTC)
+	if _, err := repository.Create(ctx, group.Group{
+		ID:             "group-1",
+		WorkspaceID:    "workspace-1",
+		Name:           "Reviewers",
+		NormalizedName: "Reviewers",
+		GroupingRule: group.GroupingRule{
+			ExpirationDate: now.Add(24 * time.Hour),
+		},
+		IndividualMembers: []group.IndividualMember{{
+			ID:             "member-1",
+			GroupID:        "group-1",
+			NTAccount:      "user1",
+			ExpirationDate: expiration,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+	insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+		ID:               "member-task-1",
+		GroupID:          "group-1",
+		NTAccount:        "user1",
+		ExpirationBucket: "2026-05-11",
+	})
+	location, err := group.ParseExpirationBucketLocation("UTC+8")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := repository.ExpireIndividualMember(ctx, group.ExpireIndividualMemberCommand{
+		TaskID:           "member-task-1",
+		GroupID:          "group-1",
+		NTAccount:        "user1",
+		ExpirationBucket: "2026-05-11",
+	}, now.Add(time.Hour), location)
+	if err != nil {
+		t.Fatalf("ExpireIndividualMember() error = %v", err)
+	}
+	if status != group.ExpireIndividualMemberStatusExpired {
+		t.Fatalf("status = %s, want expired", status)
+	}
+
+	var doc individualMemberDocument
+	err = db.Collection(groupIndividualMemberCollectionName).FindOne(ctx, bson.M{"group_id": "group-1", "nt_account": "user1"}).Decode(&doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.ExpiredAt == nil || !doc.ExpiredAt.Equal(now.Add(time.Hour)) {
+		t.Fatalf("expired_at = %v, want %s", doc.ExpiredAt, now.Add(time.Hour))
+	}
+	taskCount, err := db.Collection(individualMemberExpiryTaskCollectionName).CountDocuments(ctx, bson.M{"_id": "member-task-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("task count = %d, want 0", taskCount)
+	}
+}
+
+func TestMongoGroupRepositoryExpireIndividualMemberStaleCasesIntegration(t *testing.T) {
+	tests := []repositoryExpiryStaleCase[group.ExpireIndividualMemberCommand, group.ExpireIndividualMemberStatus]{
+		{
+			name: "missing task",
+			command: group.ExpireIndividualMemberCommand{
+				TaskID:           "task-missing",
+				GroupID:          "group-1",
+				NTAccount:        "user1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want: group.ExpireIndividualMemberStatusStaleTask,
+		},
+		{
+			name: "missing member deletes task",
+			setup: func(t *testing.T, repository *MongoGroupRepository) {
+				insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+					ID:               "member-task-1",
+					GroupID:          "group-1",
+					NTAccount:        "user1",
+					ExpirationBucket: "2026-05-10",
+				})
+			},
+			command: group.ExpireIndividualMemberCommand{
+				TaskID:           "member-task-1",
+				GroupID:          "group-1",
+				NTAccount:        "user1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want: group.ExpireIndividualMemberStatusStaleMember,
+		},
+		{
+			name: "already expired deletes task",
+			setup: func(t *testing.T, repository *MongoGroupRepository) {
+				now := repositoryTime()
+				expiredAt := now.Add(time.Minute)
+				insertGroupWithMember(t, repository, groupDocument{
+					ID:          "group-1",
+					WorkspaceID: "workspace-1",
+					GroupingRule: groupingRuleDocument{
+						ExpirationDate: now.Add(24 * time.Hour),
+					},
+					CreatedAt: now,
+					UpdatedAt: now,
+				}, individualMemberDocument{
+					ID:             "member-1",
+					GroupID:        "group-1",
+					NTAccount:      "user1",
+					ExpirationDate: now,
+					ExpiredAt:      &expiredAt,
+					CreatedAt:      now,
+					UpdatedAt:      now,
+				})
+				insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+					ID:               "member-task-1",
+					GroupID:          "group-1",
+					NTAccount:        "user1",
+					ExpirationBucket: "2026-05-10",
+				})
+			},
+			command: group.ExpireIndividualMemberCommand{
+				TaskID:           "member-task-1",
+				GroupID:          "group-1",
+				NTAccount:        "user1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want: group.ExpireIndividualMemberStatusAlreadyExpired,
+		},
+		{
+			name: "bucket mismatch keeps task",
+			setup: func(t *testing.T, repository *MongoGroupRepository) {
+				now := time.Date(2026, 5, 10, 16, 30, 0, 0, time.UTC)
+				insertGroupWithMember(t, repository, groupDocument{
+					ID:          "group-1",
+					WorkspaceID: "workspace-1",
+					GroupingRule: groupingRuleDocument{
+						ExpirationDate: now.Add(24 * time.Hour),
+					},
+					CreatedAt: now,
+					UpdatedAt: now,
+				}, individualMemberDocument{
+					ID:             "member-1",
+					GroupID:        "group-1",
+					NTAccount:      "user1",
+					ExpirationDate: now,
+					CreatedAt:      now,
+					UpdatedAt:      now,
+				})
+				insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+					ID:               "member-task-1",
+					GroupID:          "group-1",
+					NTAccount:        "user1",
+					ExpirationBucket: "2026-05-10",
+				})
+			},
+			command: group.ExpireIndividualMemberCommand{
+				TaskID:           "member-task-1",
+				GroupID:          "group-1",
+				NTAccount:        "user1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want:      group.ExpireIndividualMemberStatusStaleBucket,
+			wantTasks: 1,
+		},
+	}
+
+	runRepositoryExpiryStaleCases(t, tests,
+		func(ctx context.Context, repository *MongoGroupRepository, command group.ExpireIndividualMemberCommand, expiredAt time.Time, location *time.Location) (group.ExpireIndividualMemberStatus, error) {
+			return repository.ExpireIndividualMember(ctx, command, expiredAt, location)
+		},
+		func(ctx context.Context, repository *MongoGroupRepository, command group.ExpireIndividualMemberCommand) (int64, error) {
+			return repository.memberExpiryTasks.CountDocuments(ctx, bson.M{"_id": command.TaskID})
+		},
+	)
+}
+
+type repositoryExpiryStaleCase[C any, S comparable] struct {
+	name      string
+	setup     func(t *testing.T, repository *MongoGroupRepository)
+	command   C
+	want      S
+	wantTasks int64
+}
+
+func runRepositoryExpiryStaleCases[C any, S comparable](
+	t *testing.T,
+	tests []repositoryExpiryStaleCase[C, S],
+	expire func(context.Context, *MongoGroupRepository, C, time.Time, *time.Location) (S, error),
+	countTasks func(context.Context, *MongoGroupRepository, C) (int64, error),
+) {
+	t.Helper()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, _ := newIntegrationDatabase(t)
@@ -1068,15 +1275,15 @@ func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.
 				t.Fatal(err)
 			}
 
-			status, err := repository.ExpireGroupingRule(context.Background(), tt.command, repositoryTime(), location)
+			status, err := expire(context.Background(), repository, tt.command, repositoryTime(), location)
 			if err != nil {
-				t.Fatalf("ExpireGroupingRule() error = %v", err)
+				t.Fatalf("expire command error = %v", err)
 			}
 			if status != tt.want {
-				t.Fatalf("status = %s, want %s", status, tt.want)
+				t.Fatalf("status = %v, want %v", status, tt.want)
 			}
 			if tt.wantTasks > 0 {
-				count, err := repository.expiryTasks.CountDocuments(context.Background(), bson.M{"_id": tt.command.TaskID})
+				count, err := countTasks(context.Background(), repository, tt.command)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1094,6 +1301,16 @@ func insertGroupWithTask(t *testing.T, repository *MongoGroupRepository, groupDo
 		t.Fatal(err)
 	}
 	insertExpiryTask(t, repository, taskDoc)
+}
+
+func insertGroupWithMember(t *testing.T, repository *MongoGroupRepository, groupDoc groupDocument, memberDoc individualMemberDocument) {
+	t.Helper()
+	if _, err := repository.groups.InsertOne(context.Background(), groupDoc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.members.InsertOne(context.Background(), memberDoc); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func insertExpiryTask(t *testing.T, repository *MongoGroupRepository, taskDoc expiryTaskDocument) {
