@@ -384,12 +384,14 @@ Indexes:
 
 ```txt
 partial unique { group_id: 1, nt_account: 1 } where deleted_at == null
+partial { group_id: 1, _id: 1 } where deleted_at == null and expired_at == null
 { group_id: 1, created_at: -1, _id: -1 }
 ```
 
 Rationale:
 
 - The partial unique index prevents multiple active member rows for the same `group_id + nt_account` and supports direct update/delete lookup by member identity.
+- The partial active-unexpired index supports existence checks used when grouping rules are removed and the service must confirm that at least one effective individual member remains.
 - The pagination index supports active member reads sorted by `created_at DESC, _id DESC`.
 - `group_individual_members` intentionally does not duplicate `workspace_id`; member APIs confirm group ownership through the active `groups` document first.
 - `expired_at` is not part of the unique index. Expired records remain active records until they are soft-deleted; clients can extend an expired member through the expiration update API, which resets `expired_at`.
@@ -577,6 +579,7 @@ Repository tests:
 - Delete sets `deleted_at` and `updated_at` to the same timestamp.
 - Delete removes the matching `individual_member_expiry_task` in the same transaction.
 - Delete returns success when the active group or active member is missing.
+- Active-unexpired existence index is created as partial `{ group_id: 1, _id: 1 }` where `deleted_at == null and expired_at == null`.
 - Pagination index is created as `{ group_id: 1, created_at: -1, _id: -1 }`.
 - Individual-member expiry task indexes are created as `unique { group_id: 1, nt_account: 1 }` and `{ expiration_bucket: 1, _id: 1 }`.
 

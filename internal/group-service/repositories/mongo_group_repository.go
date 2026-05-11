@@ -21,6 +21,7 @@ const (
 	groupsActiveNameUniqueIndexName                        = "groups_active_workspace_normalized_name_unique"
 	groupsWorkspaceCreatedIndexName                        = "groups_workspace_created_id"
 	membersActiveGroupAccountUniqueIndexName               = "group_individual_members_active_group_account_unique"
+	membersActiveUnexpiredGroupIndexName                   = "group_individual_members_active_unexpired_group"
 	membersGroupCreatedIndexName                           = "group_individual_members_group_created_id"
 	expiryTasksActiveGroupUniqueIndexName                  = "group_expiry_task_active_workspace_group_unique"
 	expiryTasksBucketIndexName                             = "group_expiry_task_bucket_id"
@@ -224,11 +225,11 @@ func (r *MongoGroupRepository) UpdateGroupingRule(ctx context.Context, input gro
 			return nil, group.ErrNotFound
 		}
 		if len(input.Rules) == 0 {
-			memberCount, memberCountErr := r.members.CountDocuments(sessionCtx, activeUnexpiredIndividualMemberFilter(input.GroupID))
-			if memberCountErr != nil {
-				return nil, fmt.Errorf("count active individual members: %w", memberCountErr)
+			memberExists, memberExistsErr := r.activeUnexpiredIndividualMemberExists(sessionCtx, input.GroupID)
+			if memberExistsErr != nil {
+				return nil, memberExistsErr
 			}
-			if memberCount == 0 {
+			if !memberExists {
 				return nil, fmt.Errorf("%w: at least one membership source is required", group.ErrInvalidInput)
 			}
 		}
@@ -561,6 +562,18 @@ func individualMemberIndexModels() []mongo.IndexModel {
 		{
 			Keys: bson.D{
 				{Key: "group_id", Value: 1},
+				{Key: "_id", Value: 1},
+			},
+			Options: options.Index().
+				SetName(membersActiveUnexpiredGroupIndexName).
+				SetPartialFilterExpression(bson.M{
+					"deleted_at": nil,
+					"expired_at": nil,
+				}),
+		},
+		{
+			Keys: bson.D{
+				{Key: "group_id", Value: 1},
 				{Key: "created_at", Value: -1},
 				{Key: "_id", Value: -1},
 			},
@@ -627,6 +640,21 @@ func (r *MongoGroupRepository) activeGroupExists(ctx context.Context, query grou
 			return false, nil
 		}
 		return false, fmt.Errorf("find active group: %w", err)
+	}
+	return true, nil
+}
+
+func (r *MongoGroupRepository) activeUnexpiredIndividualMemberExists(ctx context.Context, groupID string) (bool, error) {
+	var doc individualMemberDocument
+	err := r.members.FindOne(ctx,
+		activeUnexpiredIndividualMemberFilter(groupID),
+		options.FindOne().SetProjection(bson.M{"_id": 1}),
+	).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, nil
+		}
+		return false, fmt.Errorf("find active unexpired individual member: %w", err)
 	}
 	return true, nil
 }

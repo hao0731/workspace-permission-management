@@ -184,8 +184,8 @@ func TestIndexModels(t *testing.T) {
 	}
 
 	memberIndexes := individualMemberIndexModels()
-	if len(memberIndexes) != 2 {
-		t.Fatalf("member indexes len = %d, want 2", len(memberIndexes))
+	if len(memberIndexes) != 3 {
+		t.Fatalf("member indexes len = %d, want 3", len(memberIndexes))
 	}
 	memberUniqueOptions := indexOptions(t, memberIndexes[0])
 	if *memberUniqueOptions.Name != membersActiveGroupAccountUniqueIndexName {
@@ -329,6 +329,73 @@ func TestMongoGroupRepositoryUpdateGroupingRuleUsesUpdateResultForExistence(t *t
 	}
 }
 
+func TestMongoGroupRepositoryUpdateGroupingRuleUsesMemberExistenceFindForEmptyRules(t *testing.T) {
+	var commands []string
+	var projection bson.Raw
+	monitor := &event.CommandMonitor{
+		Started: func(_ context.Context, evt *event.CommandStartedEvent) {
+			commands = append(commands, evt.CommandName)
+			if evt.CommandName != "find" {
+				return
+			}
+			collectionName := evt.Command.Lookup("find")
+			if collectionName.Type != bson.TypeString || collectionName.StringValue() != groupIndividualMemberCollectionName {
+				return
+			}
+			var ok bool
+			projection, ok = evt.Command.Lookup("projection").DocumentOK()
+			if !ok {
+				t.Fatal("member existence find projection is missing")
+			}
+		},
+	}
+	deployment := drivertest.NewMockDeployment(
+		mockMatchedUpdateResponse(),
+		mockFindMemberIDResponse(),
+		mockMatchedUpdateResponse(),
+		bson.D{{Key: "ok", Value: 1}},
+	)
+	clientOptions := options.Client().SetMonitor(monitor)
+	if err := xoptions.SetInternalClientOptions(clientOptions, "deployment", deployment); err != nil {
+		t.Fatalf("set mock deployment: %v", err)
+	}
+	client, err := mongo.Connect(clientOptions)
+	if err != nil {
+		t.Fatalf("connect mock mongodb: %v", err)
+	}
+	t.Cleanup(func() {
+		if disconnectErr := client.Disconnect(context.Background()); disconnectErr != nil {
+			t.Fatalf("disconnect mock mongodb: %v", disconnectErr)
+		}
+	})
+	repository := NewMongoGroupRepository(client, client.Database("test"))
+
+	err = repository.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		ExpirationDate: repositoryTime().Add(48 * time.Hour),
+		Rules:          nil,
+	}, repositoryTime().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("UpdateGroupingRule error = %v, want nil", err)
+	}
+
+	if containsCommand(commands, "aggregate") || containsCommand(commands, "count") {
+		t.Fatalf("commands = %v, want member existence check to use find instead of count", commands)
+	}
+	idValue := projection.Lookup("_id")
+	if idValue.Type != bson.TypeInt32 || idValue.Int32() != 1 {
+		t.Fatalf("member existence projection _id = %v, want int32(1)", idValue)
+	}
+	elements, err := projection.Elements()
+	if err != nil {
+		t.Fatalf("read member existence projection elements: %v", err)
+	}
+	if len(elements) != 1 {
+		t.Fatalf("member existence projection = %s, want only _id", projection)
+	}
+}
+
 func TestMongoGroupRepositoryActiveGroupExistsUsesIDProjection(t *testing.T) {
 	var projection bson.Raw
 	monitor := &event.CommandMonitor{
@@ -381,13 +448,33 @@ func TestMongoGroupRepositoryActiveGroupExistsUsesIDProjection(t *testing.T) {
 
 func TestIndividualMemberPaginationIndex(t *testing.T) {
 	memberIndexes := individualMemberIndexModels()
-	if len(memberIndexes) != 2 {
-		t.Fatalf("member indexes len = %d, want 2", len(memberIndexes))
+	if len(memberIndexes) != 3 {
+		t.Fatalf("member indexes len = %d, want 3", len(memberIndexes))
 	}
-	keys := memberIndexes[1].Keys
+	keys := memberIndexes[2].Keys
 	want := bson.D{{Key: "group_id", Value: 1}, {Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("member pagination index keys = %#v, want %#v", keys, want)
+	}
+}
+
+func TestIndividualMemberActiveUnexpiredIndex(t *testing.T) {
+	memberIndexes := individualMemberIndexModels()
+	if len(memberIndexes) != 3 {
+		t.Fatalf("member indexes len = %d, want 3", len(memberIndexes))
+	}
+	keys := memberIndexes[1].Keys
+	wantKeys := bson.D{{Key: "group_id", Value: 1}, {Key: "_id", Value: 1}}
+	if !reflect.DeepEqual(keys, wantKeys) {
+		t.Fatalf("member active unexpired index keys = %#v, want %#v", keys, wantKeys)
+	}
+	indexOptions := indexOptions(t, memberIndexes[1])
+	if *indexOptions.Name != membersActiveUnexpiredGroupIndexName {
+		t.Fatalf("member active unexpired index name = %q, want %q", *indexOptions.Name, membersActiveUnexpiredGroupIndexName)
+	}
+	wantPartialFilter := bson.M{"deleted_at": nil, "expired_at": nil}
+	if !reflect.DeepEqual(indexOptions.PartialFilterExpression, wantPartialFilter) {
+		t.Fatalf("member active unexpired partial filter = %#v, want %#v", indexOptions.PartialFilterExpression, wantPartialFilter)
 	}
 }
 
@@ -422,6 +509,17 @@ func mockFindGroupIDResponse() bson.D {
 			{Key: "id", Value: int64(0)},
 			{Key: "ns", Value: "test.groups"},
 			{Key: "firstBatch", Value: bson.A{bson.D{{Key: "_id", Value: "group-1"}}}},
+		}},
+	}
+}
+
+func mockFindMemberIDResponse() bson.D {
+	return bson.D{
+		{Key: "ok", Value: 1},
+		{Key: "cursor", Value: bson.D{
+			{Key: "id", Value: int64(0)},
+			{Key: "ns", Value: "test.group_individual_members"},
+			{Key: "firstBatch", Value: bson.A{bson.D{{Key: "_id", Value: "member-1"}}}},
 		}},
 	}
 }

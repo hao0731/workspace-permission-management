@@ -525,8 +525,8 @@ Failure behavior:
 3. Repository starts a MongoDB transaction because validation may depend on current unexpired active individual member state.
 4. Repository confirms the active group exists for `_id`, `workspace_id`, and `deleted_at: null`.
 5. If the group is missing, service returns `ErrNotFound` and the handler renders `404 Not Found`.
-6. If the replacement `rules` array is empty, repository counts unexpired active individual members for the group using `deleted_at: null` and `expired_at: null` or missing.
-7. If the replacement `rules` array is empty and unexpired active member count is zero, service returns `ErrInvalidInput` and the handler renders `400 Bad Request`.
+6. If the replacement `rules` array is empty, repository checks whether at least one unexpired active individual member exists for the group using `deleted_at: null`, `expired_at: null` or missing, an `_id`-only projection, and the active-unexpired member index.
+7. If the replacement `rules` array is empty and no unexpired active member exists, service returns `ErrInvalidInput` and the handler renders `400 Bad Request`.
 8. Repository updates the group document's `grouping_rule`, sets `grouping_rule.expired_at` to `null`, and updates `updated_at`.
 9. If replacement `rules` is non-empty, repository deletes the old `group_expiry_task` and inserts a new one with a new task ID and recalculated expiration bucket.
 10. If replacement `rules` is empty, repository deletes the old `group_expiry_task` and inserts no replacement task.
@@ -584,13 +584,13 @@ Service tests:
 - DELETE passes one timestamp to group and member soft-delete persistence.
 - DELETE requests cleanup of group expiry tasks and individual-member expiry tasks for the deleted group.
 - PUT grouping-rules returns not found when the active group is missing.
-- PUT grouping-rules validates empty rules against unexpired active member count.
+- PUT grouping-rules validates empty rules through an unexpired active member existence query.
 - PUT grouping-rules requests a new expiry task when replacement rules are non-empty.
 - PUT grouping-rules requests expiry task removal when replacement rules are empty.
 
 Repository tests:
 
-- `EnsureIndexes` creates the required partial unique, support, group expiry task, and individual-member expiry task indexes.
+- `EnsureIndexes` creates the required partial unique, active-unexpired member existence, support, group expiry task, and individual-member expiry task indexes.
 - Successful create writes `groups`, `group_individual_members`, `group_expiry_task`, and `individual_member_expiry_task` in one transaction when dynamic grouping rules and individual members are present.
 - Successful create without dynamic grouping rules writes no `group_expiry_task`.
 - Successful create without individual members writes no `individual_member_expiry_task`.
