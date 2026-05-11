@@ -80,6 +80,26 @@ func TestNewGroupDocumentMapping(t *testing.T) {
 	}
 }
 
+func TestNewGroupDocumentIncludesExpiredAt(t *testing.T) {
+	t.Parallel()
+
+	expiredAt := repositoryTime()
+	doc := newGroupDocument(group.Group{
+		ID:          "group-1",
+		WorkspaceID: "workspace-1",
+		Name:        "Reviewers",
+		GroupingRule: group.GroupingRule{
+			Rules:          []group.Rule{{AttributeKey: "department", Operator: group.OperatorEq, Value: "ABCD-123"}},
+			ExpirationDate: expiredAt.Add(24 * time.Hour),
+			ExpiredAt:      &expiredAt,
+		},
+	})
+
+	if doc.GroupingRule.ExpiredAt == nil || !doc.GroupingRule.ExpiredAt.Equal(expiredAt) {
+		t.Fatalf("ExpiredAt = %v, want %s", doc.GroupingRule.ExpiredAt, expiredAt)
+	}
+}
+
 func TestNewIndividualMemberDocuments(t *testing.T) {
 	model := repositoryGroup()
 	docs := newIndividualMemberDocuments(model)
@@ -92,6 +112,21 @@ func TestNewIndividualMemberDocuments(t *testing.T) {
 	}
 	if docs[0].DeletedAt != nil {
 		t.Fatal("DeletedAt != nil, want nil")
+	}
+}
+
+func TestNewExpiryTaskDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := newExpiryTaskDocument(group.ExpiryTask{
+		ID:               "task-1",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-05-10",
+	})
+
+	if doc.ID != "task-1" || doc.WorkspaceID != "workspace-1" || doc.GroupID != "group-1" || doc.ExpirationBucket != "2026-05-10" {
+		t.Fatalf("doc = %+v", doc)
 	}
 }
 
@@ -115,6 +150,18 @@ func TestIndexModels(t *testing.T) {
 	memberUniqueOptions := indexOptions(t, memberIndexes[0])
 	if *memberUniqueOptions.Name != membersActiveGroupAccountUniqueIndexName {
 		t.Fatalf("member unique index name = %q, want %q", *memberUniqueOptions.Name, membersActiveGroupAccountUniqueIndexName)
+	}
+
+	expiryTaskIndexes := groupExpiryTaskIndexModels()
+	if len(expiryTaskIndexes) != 2 {
+		t.Fatalf("expiry task indexes len = %d, want 2", len(expiryTaskIndexes))
+	}
+	expiryTaskUniqueOptions := indexOptions(t, expiryTaskIndexes[0])
+	if *expiryTaskUniqueOptions.Name != expiryTasksActiveGroupUniqueIndexName {
+		t.Fatalf("expiry task unique index name = %q, want %q", *expiryTaskUniqueOptions.Name, expiryTasksActiveGroupUniqueIndexName)
+	}
+	if expiryTaskUniqueOptions.Unique == nil || !*expiryTaskUniqueOptions.Unique {
+		t.Fatal("expiry task unique index Unique = false, want true")
 	}
 }
 
@@ -407,6 +454,55 @@ func TestMongoGroupRepositoryCreateIntegration(t *testing.T) {
 	}
 }
 
+func TestMongoGroupRepositoryCreateWritesExpiryTaskIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+
+	model := repositoryGroup()
+	model.ExpiryTask = &group.ExpiryTask{
+		ID:               "task-1",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-06-01",
+	}
+	if _, err := repository.Create(context.Background(), model); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+
+	var task expiryTaskDocument
+	err := db.Collection(groupExpiryTaskCollectionName).FindOne(context.Background(), bson.M{"_id": "task-1"}).Decode(&task)
+	if err != nil {
+		t.Fatalf("find expiry task: %v", err)
+	}
+	if task.ExpirationBucket != "2026-06-01" {
+		t.Fatalf("expiration bucket = %q, want 2026-06-01", task.ExpirationBucket)
+	}
+}
+
+func TestMongoGroupRepositoryCreateWithoutExpiryTaskIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+
+	model := repositoryGroup()
+	model.ExpiryTask = nil
+	if _, err := repository.Create(context.Background(), model); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+	count, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
+	if err != nil {
+		t.Fatalf("count expiry tasks: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expiry task count = %d, want 0", count)
+	}
+}
+
 func TestMongoGroupRepositoryDuplicateActiveNameIntegration(t *testing.T) {
 	client, db := newIntegrationDatabase(t)
 	repository := NewMongoGroupRepository(client, db)
@@ -516,6 +612,14 @@ func TestMongoGroupRepositoryDeleteIntegration(t *testing.T) {
 	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
 		t.Fatalf("Create error = %v, want nil", err)
 	}
+	if _, err := db.Collection(groupExpiryTaskCollectionName).InsertOne(context.Background(), expiryTaskDocument{
+		ID:               "task-1",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-06-01",
+	}); err != nil {
+		t.Fatalf("insert expiry task: %v", err)
+	}
 
 	deletedAt := repositoryTime().Add(time.Hour)
 	if err := repository.Delete(context.Background(), group.DeleteInput{WorkspaceID: "workspace-1", GroupID: "group-1"}, deletedAt); err != nil {
@@ -536,6 +640,13 @@ func TestMongoGroupRepositoryDeleteIntegration(t *testing.T) {
 	if memberCount != 1 {
 		t.Fatalf("deleted member count = %d, want 1", memberCount)
 	}
+	taskCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
+	if err != nil {
+		t.Fatalf("count expiry tasks: %v", err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("expiry task count = %d, want 0", taskCount)
+	}
 }
 
 func TestMongoGroupRepositoryUpdateGroupingRuleIntegration(t *testing.T) {
@@ -546,6 +657,14 @@ func TestMongoGroupRepositoryUpdateGroupingRuleIntegration(t *testing.T) {
 	}
 	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
 		t.Fatalf("Create error = %v, want nil", err)
+	}
+	if _, err := db.Collection(groupExpiryTaskCollectionName).InsertOne(context.Background(), expiryTaskDocument{
+		ID:               "task-old",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-06-01",
+	}); err != nil {
+		t.Fatalf("insert expiry task: %v", err)
 	}
 
 	expiration := repositoryTime().Add(48 * time.Hour)
@@ -559,6 +678,12 @@ func TestMongoGroupRepositoryUpdateGroupingRuleIntegration(t *testing.T) {
 			Multi:        false,
 			Value:        int32(5),
 		}},
+		ExpiryTask: &group.ExpiryTask{
+			ID:               "task-new",
+			WorkspaceID:      "workspace-1",
+			GroupID:          "group-1",
+			ExpirationBucket: "2026-05-11",
+		},
 	}, repositoryTime().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("UpdateGroupingRule error = %v, want nil", err)
@@ -570,6 +695,20 @@ func TestMongoGroupRepositoryUpdateGroupingRuleIntegration(t *testing.T) {
 	}
 	if len(got.GroupingRule.Rules) != 1 || got.GroupingRule.Rules[0].AttributeKey != "level" {
 		t.Fatalf("rules = %+v, want level rule", got.GroupingRule.Rules)
+	}
+	oldCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-old"})
+	if err != nil {
+		t.Fatalf("count old expiry tasks: %v", err)
+	}
+	if oldCount != 0 {
+		t.Fatalf("old expiry task count = %d, want 0", oldCount)
+	}
+	newCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-new"})
+	if err != nil {
+		t.Fatalf("count new expiry tasks: %v", err)
+	}
+	if newCount != 1 {
+		t.Fatalf("new expiry task count = %d, want 1", newCount)
 	}
 }
 
@@ -593,6 +732,248 @@ func TestMongoGroupRepositoryUpdateGroupingRuleRejectsEmptyRulesWithoutMembersIn
 	}, repositoryTime().Add(time.Hour))
 	if !errors.Is(err, group.ErrInvalidInput) {
 		t.Fatalf("UpdateGroupingRule error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestMongoGroupRepositoryUpdateGroupingRuleWithoutRulesDeletesExpiryTaskIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
+		t.Fatalf("Create error = %v, want nil", err)
+	}
+	if _, err := db.Collection(groupExpiryTaskCollectionName).InsertOne(context.Background(), expiryTaskDocument{
+		ID:               "task-old",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-06-01",
+	}); err != nil {
+		t.Fatalf("insert expiry task: %v", err)
+	}
+
+	err := repository.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		ExpirationDate: repositoryTime().Add(48 * time.Hour),
+		Rules:          nil,
+	}, repositoryTime().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("UpdateGroupingRule error = %v, want nil", err)
+	}
+	count, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-old"})
+	if err != nil {
+		t.Fatalf("count expiry tasks: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expiry task count = %d, want 0", count)
+	}
+}
+
+func TestMongoGroupRepositoryExpireGroupingRuleExpiresAndDeletesTaskIntegration(t *testing.T) {
+	client, db := newIntegrationDatabase(t)
+	repository := NewMongoGroupRepository(client, db)
+	if err := repository.EnsureIndexes(context.Background()); err != nil {
+		t.Fatalf("EnsureIndexes error = %v, want nil", err)
+	}
+
+	ctx := context.Background()
+	now := repositoryTime()
+	expiration := time.Date(2026, 5, 10, 16, 30, 0, 0, time.UTC)
+	insertGroupWithTask(t, repository, groupDocument{
+		ID:          "group-1",
+		WorkspaceID: "workspace-1",
+		GroupingRule: groupingRuleDocument{
+			Rules:          []ruleDocument{{AttributeKey: "department", Operator: group.OperatorEq, Value: "ABCD-123"}},
+			ExpirationDate: expiration,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, expiryTaskDocument{
+		ID:               "task-1",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-05-11",
+	})
+	location, err := group.ParseExpirationBucketLocation("UTC+8")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := repository.ExpireGroupingRule(ctx, group.ExpireGroupingRuleCommand{
+		TaskID:           "task-1",
+		WorkspaceID:      "workspace-1",
+		GroupID:          "group-1",
+		ExpirationBucket: "2026-05-11",
+	}, now.Add(time.Hour), location)
+	if err != nil {
+		t.Fatalf("ExpireGroupingRule() error = %v", err)
+	}
+	if status != group.ExpireGroupingRuleStatusExpired {
+		t.Fatalf("status = %s, want expired", status)
+	}
+
+	var doc groupDocument
+	err = db.Collection(groupCollectionName).FindOne(ctx, bson.M{"_id": "group-1"}).Decode(&doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.GroupingRule.ExpiredAt == nil || !doc.GroupingRule.ExpiredAt.Equal(now.Add(time.Hour)) {
+		t.Fatalf("expired_at = %v, want %s", doc.GroupingRule.ExpiredAt, now.Add(time.Hour))
+	}
+	taskCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(ctx, bson.M{"_id": "task-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("task count = %d, want 0", taskCount)
+	}
+}
+
+func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, repository *MongoGroupRepository)
+		command   group.ExpireGroupingRuleCommand
+		want      group.ExpireGroupingRuleStatus
+		wantTasks int64
+	}{
+		{
+			name: "missing task",
+			command: group.ExpireGroupingRuleCommand{
+				TaskID:           "task-missing",
+				WorkspaceID:      "workspace-1",
+				GroupID:          "group-1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want: group.ExpireGroupingRuleStatusStaleTask,
+		},
+		{
+			name: "missing group deletes task",
+			setup: func(t *testing.T, repository *MongoGroupRepository) {
+				insertExpiryTask(t, repository, expiryTaskDocument{
+					ID:               "task-1",
+					WorkspaceID:      "workspace-1",
+					GroupID:          "group-1",
+					ExpirationBucket: "2026-05-10",
+				})
+			},
+			command: group.ExpireGroupingRuleCommand{
+				TaskID:           "task-1",
+				WorkspaceID:      "workspace-1",
+				GroupID:          "group-1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want: group.ExpireGroupingRuleStatusStaleGroup,
+		},
+		{
+			name: "already expired deletes task",
+			setup: func(t *testing.T, repository *MongoGroupRepository) {
+				now := repositoryTime()
+				insertGroupWithTask(t, repository, groupDocument{
+					ID:          "group-1",
+					WorkspaceID: "workspace-1",
+					GroupingRule: groupingRuleDocument{
+						Rules:          []ruleDocument{{AttributeKey: "department", Operator: group.OperatorEq, Value: "ABCD-123"}},
+						ExpirationDate: now,
+						ExpiredAt:      &now,
+					},
+					CreatedAt: now,
+					UpdatedAt: now,
+				}, expiryTaskDocument{
+					ID:               "task-1",
+					WorkspaceID:      "workspace-1",
+					GroupID:          "group-1",
+					ExpirationBucket: "2026-05-10",
+				})
+			},
+			command: group.ExpireGroupingRuleCommand{
+				TaskID:           "task-1",
+				WorkspaceID:      "workspace-1",
+				GroupID:          "group-1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want: group.ExpireGroupingRuleStatusAlreadyExpired,
+		},
+		{
+			name: "bucket mismatch keeps task",
+			setup: func(t *testing.T, repository *MongoGroupRepository) {
+				now := time.Date(2026, 5, 10, 16, 30, 0, 0, time.UTC)
+				insertGroupWithTask(t, repository, groupDocument{
+					ID:          "group-1",
+					WorkspaceID: "workspace-1",
+					GroupingRule: groupingRuleDocument{
+						Rules:          []ruleDocument{{AttributeKey: "department", Operator: group.OperatorEq, Value: "ABCD-123"}},
+						ExpirationDate: now,
+					},
+					CreatedAt: now,
+					UpdatedAt: now,
+				}, expiryTaskDocument{
+					ID:               "task-1",
+					WorkspaceID:      "workspace-1",
+					GroupID:          "group-1",
+					ExpirationBucket: "2026-05-10",
+				})
+			},
+			command: group.ExpireGroupingRuleCommand{
+				TaskID:           "task-1",
+				WorkspaceID:      "workspace-1",
+				GroupID:          "group-1",
+				ExpirationBucket: "2026-05-10",
+			},
+			want:      group.ExpireGroupingRuleStatusStaleBucket,
+			wantTasks: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := newIntegrationDatabase(t)
+			repository := NewMongoGroupRepository(client, client.Database(integrationDatabaseName(t.Name())))
+			if err := repository.EnsureIndexes(context.Background()); err != nil {
+				t.Fatalf("EnsureIndexes error = %v, want nil", err)
+			}
+			if tt.setup != nil {
+				tt.setup(t, repository)
+			}
+			location, err := group.ParseExpirationBucketLocation("UTC+8")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			status, err := repository.ExpireGroupingRule(context.Background(), tt.command, repositoryTime(), location)
+			if err != nil {
+				t.Fatalf("ExpireGroupingRule() error = %v", err)
+			}
+			if status != tt.want {
+				t.Fatalf("status = %s, want %s", status, tt.want)
+			}
+			if tt.wantTasks > 0 {
+				count, err := repository.expiryTasks.CountDocuments(context.Background(), bson.M{"_id": tt.command.TaskID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if count != tt.wantTasks {
+					t.Fatalf("task count = %d, want %d", count, tt.wantTasks)
+				}
+			}
+		})
+	}
+}
+
+func insertGroupWithTask(t *testing.T, repository *MongoGroupRepository, groupDoc groupDocument, taskDoc expiryTaskDocument) {
+	t.Helper()
+	if _, err := repository.groups.InsertOne(context.Background(), groupDoc); err != nil {
+		t.Fatal(err)
+	}
+	insertExpiryTask(t, repository, taskDoc)
+}
+
+func insertExpiryTask(t *testing.T, repository *MongoGroupRepository, taskDoc expiryTaskDocument) {
+	t.Helper()
+	if _, err := repository.expiryTasks.InsertOne(context.Background(), taskDoc); err != nil {
+		t.Fatal(err)
 	}
 }
 

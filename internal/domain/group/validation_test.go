@@ -104,6 +104,129 @@ func TestCreateInputValidateRejectsLimitExceededWithOptions(t *testing.T) {
 	}
 }
 
+func TestExpireGroupingRuleCommandValidate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		command   ExpireGroupingRuleCommand
+		wantError string
+	}{
+		{
+			name:      "empty task id",
+			command:   ExpireGroupingRuleCommand{WorkspaceID: "workspace-1", GroupID: "group-1", ExpirationBucket: "2026-05-10"},
+			wantError: "task id is required",
+		},
+		{
+			name:      "empty workspace id",
+			command:   ExpireGroupingRuleCommand{TaskID: "task-1", GroupID: "group-1", ExpirationBucket: "2026-05-10"},
+			wantError: "workspace id is required",
+		},
+		{
+			name:      "empty group id",
+			command:   ExpireGroupingRuleCommand{TaskID: "task-1", WorkspaceID: "workspace-1", ExpirationBucket: "2026-05-10"},
+			wantError: "group id is required",
+		},
+		{
+			name:      "invalid bucket",
+			command:   ExpireGroupingRuleCommand{TaskID: "task-1", WorkspaceID: "workspace-1", GroupID: "group-1", ExpirationBucket: "2026/05/10"},
+			wantError: "expiration bucket must use yyyy-MM-dd",
+		},
+		{
+			name:    "valid",
+			command: ExpireGroupingRuleCommand{TaskID: " task-1 ", WorkspaceID: " workspace-1 ", GroupID: " group-1 ", ExpirationBucket: "2026-05-10"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command := tt.command.Normalize()
+			err := command.Validate()
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				if command.TaskID != strings.TrimSpace(tt.command.TaskID) ||
+					command.WorkspaceID != strings.TrimSpace(tt.command.WorkspaceID) ||
+					command.GroupID != strings.TrimSpace(tt.command.GroupID) {
+					t.Fatalf("Normalize() command = %+v", command)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidInput containing %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestParseExpirationBucketLocation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		value          string
+		wantName       string
+		wantOffsetHour int
+		wantErr        bool
+	}{
+		{value: "UTC", wantName: "UTC"},
+		{value: " utc ", wantName: "UTC"},
+		{value: "UTC+8", wantName: "UTC+08:00", wantOffsetHour: 8},
+		{value: "UTC+08", wantName: "UTC+08:00", wantOffsetHour: 8},
+		{value: "UTC+08:00", wantName: "UTC+08:00", wantOffsetHour: 8},
+		{value: "UTC-5", wantName: "UTC-05:00", wantOffsetHour: -5},
+		{value: "Asia/Taipei", wantErr: true},
+		{value: "UTC+25", wantErr: true},
+		{value: "UTC+08:61", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			location, err := ParseExpirationBucketLocation(tt.value)
+			if tt.wantErr {
+				if err == nil || !errors.Is(err, ErrInvalidInput) {
+					t.Fatalf("ParseExpirationBucketLocation() error = %v, want ErrInvalidInput", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseExpirationBucketLocation() error = %v, want nil", err)
+			}
+			if location.String() != tt.wantName {
+				t.Fatalf("location name = %q, want %q", location.String(), tt.wantName)
+			}
+			_, offset := time.Date(2026, 5, 10, 0, 0, 0, 0, location).Zone()
+			if offset != tt.wantOffsetHour*3600 {
+				t.Fatalf("offset = %d, want %d", offset, tt.wantOffsetHour*3600)
+			}
+		})
+	}
+}
+
+func TestExpirationBucketFor(t *testing.T) {
+	t.Parallel()
+
+	expiration := time.Date(2026, 5, 10, 16, 30, 0, 0, time.UTC)
+	utc, err := ParseExpirationBucketLocation("UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taipei, err := ParseExpirationBucketLocation("UTC+8")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ExpirationBucketFor(expiration, utc); got != "2026-05-10" {
+		t.Fatalf("UTC bucket = %q, want 2026-05-10", got)
+	}
+	if got := ExpirationBucketFor(expiration, taipei); got != "2026-05-11" {
+		t.Fatalf("UTC+8 bucket = %q, want 2026-05-11", got)
+	}
+	if got := ExpirationBucketFor(expiration, nil); got != "2026-05-10" {
+		t.Fatalf("nil location bucket = %q, want UTC fallback", got)
+	}
+}
+
 func TestCreateInputNormalizeTrimsNamesAndKeys(t *testing.T) {
 	input := validCreateInput().Normalize()
 

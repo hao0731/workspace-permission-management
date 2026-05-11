@@ -4,7 +4,7 @@
 
 This document defines group-level APIs for `group-service`. It covers creating groups, reading one group, soft-deleting one group, and replacing the group's dynamic grouping rules.
 
-Entry point and shared service concerns are documented in [Group Service Design](group-service.md). Individual member reads, mutations, and the member collection are documented in [Group Individual Members API Design](group-service-individual-members.md).
+Entry point and shared service concerns are documented in [Group Service Design](group-service.md). Individual member reads, mutations, and the member collection are documented in [Group Individual Members API Design](group-service-individual-members.md). Grouping-rule expiry tasks and command handling are documented in [Group Expiry Command Design](group-service-group-expiry-command.md).
 
 ## Classification and Policies
 
@@ -17,7 +17,7 @@ Required policies:
 
 Policy alignment:
 
-- Group API payloads, response payloads, MongoDB documents, indexes, and transaction behavior are explicit contracts.
+- Group API payloads, response payloads, MongoDB documents, indexes, grouping-rule expiry task side effects, and transaction behavior are explicit contracts.
 - Handlers parse transport input and map errors; services own use-case behavior; repositories own MongoDB details.
 - Request and response DTOs belong in `internal/group-service/transport`.
 - Domain validation stays in `internal/domain/group` without Echo or MongoDB dependencies.
@@ -34,6 +34,8 @@ Policy alignment:
 - Trim group names before validation, persistence, uniqueness checks, and response rendering.
 - Treat grouping rules as an `AND` relationship.
 - Require all grouping-rule expiration dates to be later than request processing time.
+- Store grouping-rule expiration task documents in `group_expiry_task` when dynamic grouping rules exist.
+- Track processed dynamic grouping-rule expiration with `groups.grouping_rule.expired_at`.
 - Preserve the create invariant that a group must have at least one membership source: dynamic grouping rules or active individual members.
 - Soft-delete groups and their active individual members using `deleted_at`.
 
@@ -44,8 +46,8 @@ Policy alignment:
 - Do not define an employee attribute catalog or type system.
 - Do not implement group list, group name update, description update, hard delete, restore, or history APIs.
 - Individual member add, expiration update, and delete APIs are documented in [Group Individual Members API Design](group-service-individual-members.md).
+- Grouping-rule expiry command handling is documented in [Group Expiry Command Design](group-service-group-expiry-command.md).
 - Do not publish group-created, group-updated, group-deleted, or membership-changed events.
-- Do not implement NATS or JetStream integration for `group-service` in this phase.
 - Do not add frontend changes.
 
 ## Create Group API
@@ -139,7 +141,8 @@ Create field contract:
 - `grouping_rule.rules` and `individual_members` may each be empty, but not both.
 - `grouping_rule.rules` is limited by `GROUP_SERVICE_MAX_GROUPING_RULES`, defaulting to 10 items.
 - `individual_members` is limited by `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS`, defaulting to 1000 items.
-- `created_at`, `updated_at`, `deleted_at`, and `normalized_name` are persistence metadata and are not included in the public response contract.
+- `created_at`, `updated_at`, `deleted_at`, `normalized_name`, and `grouping_rule.expired_at` are persistence metadata and are not included in the public response contract.
+- When `grouping_rule.rules` is non-empty, create persists a matching `group_expiry_task` in the same transaction as the group document.
 
 ## Get Group API
 
@@ -228,7 +231,7 @@ Path parameters:
 Behavior:
 
 - Delete is idempotent.
-- If an active group exists for `workspace_id + group_id`, soft-delete the group and all active individual members for the group in one MongoDB transaction.
+- If an active group exists for `workspace_id + group_id`, soft-delete the group, soft-delete all active individual members for the group, and delete any matching `group_expiry_task` documents in one MongoDB transaction.
 - If no active group exists, return `204 No Content` without modifying documents.
 - Soft-delete updates set `deleted_at` and `updated_at` to the same service-generated `now` timestamp.
 - Do not publish events in this phase.
@@ -289,6 +292,9 @@ Behavior:
 
 - Replace the active group's entire `grouping_rule` value.
 - Set the group document `updated_at` to the service-generated `now`.
+- Reset `grouping_rule.expired_at` to `null` because replacement starts a fresh grouping-rule expiration lifecycle.
+- If replacement `rules` is non-empty, replace the active `group_expiry_task` in the same MongoDB transaction.
+- If replacement `rules` is empty, delete any active `group_expiry_task` for the group in the same MongoDB transaction.
 - Return `404 Not Found` when no active group exists for `workspace_id + group_id`.
 - `rules` may be empty only when the group still has at least one active individual member. This preserves the create invariant that a group has at least one membership source.
 - When `rules` is empty and the group has no active individual members, return `400 Bad Request` with `validation_failed`.
@@ -390,7 +396,7 @@ Primary types:
 - `GetQuery`: read identity containing `workspace_id` and `group_id`.
 - `DeleteInput`: delete identity containing `workspace_id` and `group_id`.
 - `UpdateGroupingRuleInput`: replacement input containing `workspace_id`, `group_id`, `rules`, and `expiration_date`.
-- `GroupingRule`: `rules` plus expiration date.
+- `GroupingRule`: `rules`, expiration date, and internal `expired_at` state.
 - `Rule`: employee attribute predicate.
 - `IndividualMember`: explicit user membership with expiration date.
 
@@ -430,7 +436,8 @@ Document schema:
         "value": unknown | unknown[]
       }
     ],
-    "expiration_date": Date
+    "expiration_date": Date,
+    "expired_at": Date | null
   },
   "created_at": Date,
   "updated_at": Date,
@@ -446,8 +453,10 @@ Field notes:
 - `normalized_name` is the trimmed name used for active uniqueness in this phase.
 - `description` is client-provided text.
 - `grouping_rule.rules` are dynamic membership predicates interpreted as `AND`.
+- `grouping_rule.expiration_date` is the configured dynamic grouping-rule expiration timestamp.
+- `grouping_rule.expired_at` is `null` until the expiry command marks the dynamic grouping rule expired. Legacy documents without this field should be treated as `null`.
 - `created_at` and `updated_at` are set to the same service-generated `now` during creation.
-- `updated_at` changes on grouping-rule replacement and group soft delete.
+- `updated_at` changes on grouping-rule replacement, grouping-rule expiry command processing, and group soft delete.
 - `deleted_at` is `null` for active groups.
 
 Indexes:
@@ -469,18 +478,19 @@ Rationale:
 
 1. Handler decodes the request and maps it to `group.CreateInput`.
 2. Service validates domain invariants, including configured grouping-rule and individual-member count limits.
-3. Service generates `group_id`, individual member IDs, and one `now` timestamp.
+3. Service generates `group_id`, individual member IDs, an expiry task ID when dynamic grouping rules are present, and one `now` timestamp.
 4. Service builds the domain `Group` model and member models.
 5. Repository starts a MongoDB session and executes the write callback through `session.WithTransaction`.
 6. Repository inserts the `groups` document.
 7. Repository inserts all `group_individual_members` documents when the request includes individual members.
-8. MongoDB driver commits the transaction and retries transient transaction errors according to `WithTransaction` behavior.
-9. Service returns the created domain `Group`.
-10. Handler renders `201 Created`.
+8. Repository inserts one `group_expiry_task` document when `grouping_rule.rules` is non-empty.
+9. MongoDB driver commits the transaction and retries transient transaction errors according to `WithTransaction` behavior.
+10. Service returns the created domain `Group`.
+11. Handler renders `201 Created`.
 
 Failure behavior:
 
-- If any insert fails, the transaction is aborted and neither collection should contain partial create data.
+- If any insert fails, the transaction is aborted and no group, member, or expiry task collection should contain partial create data.
 - If the `groups` partial unique index rejects the name, repository maps the duplicate key to a service/domain duplicate-name error.
 
 ### Get
@@ -499,7 +509,8 @@ Failure behavior:
 4. Repository soft-deletes the active group matching `_id`, `workspace_id`, and `deleted_at: null`.
 5. If no active group matched, repository makes no member changes and reports idempotent success.
 6. If the group matched, repository soft-deletes active `group_individual_members` documents for the group.
-7. Handler renders `204 No Content`.
+7. If the group matched, repository deletes any `group_expiry_task` documents for `workspace_id + group_id`.
+8. Handler renders `204 No Content`.
 
 ### Replace Grouping Rules
 
@@ -510,8 +521,10 @@ Failure behavior:
 5. If the group is missing, service returns `ErrNotFound` and the handler renders `404 Not Found`.
 6. If the replacement `rules` array is empty, repository counts active individual members for the group.
 7. If the replacement `rules` array is empty and active member count is zero, service returns `ErrInvalidInput` and the handler renders `400 Bad Request`.
-8. Repository updates the group document's `grouping_rule` and `updated_at`.
-9. Handler renders `204 No Content`.
+8. Repository updates the group document's `grouping_rule`, sets `grouping_rule.expired_at` to `null`, and updates `updated_at`.
+9. If replacement `rules` is non-empty, repository deletes the old `group_expiry_task` and inserts a new one with a new task ID and recalculated expiration bucket.
+10. If replacement `rules` is empty, repository deletes the old `group_expiry_task` and inserts no replacement task.
+11. Handler renders `204 No Content`.
 
 ## REST Client Examples
 
@@ -555,26 +568,34 @@ Transport tests:
 Service tests:
 
 - Successful create injects deterministic IDs and timestamps.
+- Successful create injects deterministic expiry task ID and bucket when dynamic grouping rules are present.
 - Duplicate group name is surfaced as a conflict error.
 - Repository failures are wrapped with context.
 - Validation failures do not call the repository.
 - GET returns a present group and an empty optional result.
 - DELETE treats missing groups as successful idempotent deletes.
 - DELETE passes one timestamp to group and member soft-delete persistence.
+- DELETE requests cleanup of group expiry tasks for the deleted group.
 - PUT grouping-rules returns not found when the active group is missing.
 - PUT grouping-rules validates empty rules against active member count.
+- PUT grouping-rules requests a new expiry task when replacement rules are non-empty.
+- PUT grouping-rules requests expiry task removal when replacement rules are empty.
 
 Repository tests:
 
-- `EnsureIndexes` creates the required partial unique and support indexes.
-- Successful create writes `groups` and `group_individual_members` in one transaction.
-- Insert failure rolls back both collections.
+- `EnsureIndexes` creates the required partial unique, support, and group expiry task indexes.
+- Successful create writes `groups`, `group_individual_members`, and `group_expiry_task` in one transaction when dynamic grouping rules are present.
+- Successful create without dynamic grouping rules writes no `group_expiry_task`.
+- Insert failure rolls back all affected collections.
 - Duplicate active group name in the same workspace fails.
 - Same group name in different workspaces succeeds.
 - GET filters by `_id`, `workspace_id`, and `deleted_at: null`.
-- DELETE soft-deletes the group and active individual members in one transaction.
+- DELETE soft-deletes the group, soft-deletes active individual members, and deletes group expiry tasks in one transaction.
 - DELETE missing group makes no member changes and succeeds.
 - PUT grouping-rules updates only an active group in the requested workspace.
+- PUT grouping-rules resets `grouping_rule.expired_at` to `null`.
+- PUT grouping-rules replaces the active `group_expiry_task` when rules are non-empty.
+- PUT grouping-rules deletes the active `group_expiry_task` when rules are empty.
 
 Handler tests:
 

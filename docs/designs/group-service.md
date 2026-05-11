@@ -8,6 +8,7 @@ This document is the entry point for `group-service`. Endpoint-family details ar
 
 - [Group API Design](group-service-group.md): group create, read, soft delete, and grouping-rule replacement.
 - [Group Individual Members API Design](group-service-individual-members.md): individual member collection schema, paginated member reads, and individual member mutations.
+- [Group Expiry Command Design](group-service-group-expiry-command.md): grouping-rule expiry tasks, JetStream command contract, and idempotent command handling.
 
 Related context:
 
@@ -38,9 +39,12 @@ Policy alignment:
 - Keep `workspace_id` as the path scope for every group endpoint.
 - Persist group definitions in MongoDB collection `groups`.
 - Persist explicit individual members in MongoDB collection `group_individual_members`.
+- Persist grouping-rule expiration tasks in MongoDB collection `group_expiry_task`.
 - Use soft deletion through `deleted_at` for both groups and individual members.
 - Keep create and delete operations that touch both collections atomic through MongoDB transactions.
 - Keep individual member add, expiration update, and delete workflows scoped to an active group and atomic through MongoDB transactions.
+- Keep grouping-rule creation, replacement, expiration task writes, and expiry command cleanup atomic through MongoDB transactions.
+- Consume grouping-rule expiry commands from NATS JetStream through `internal/shared/eventbus`.
 - Keep validation, service workflows, persistence, and transport mapping aligned with repository boundaries.
 - Use `internal/shared/health` for liveness probing.
 - Use `internal/shared/pagination` for cursor-based member list parsing and token handling.
@@ -82,9 +86,9 @@ internal/domain/group
 
 Responsibilities:
 
-- `cmd/group-service`: composition root. It loads configuration, creates the logger, connects to MongoDB, ensures repository indexes, registers health and group routes, and handles graceful shutdown.
-- `internal/group-service/handlers`: Echo handlers for path, query, and body extraction, transport validation, service invocation, and error mapping.
-- `internal/group-service/transport`: request/response DTOs, RFC3339 parsing, cursor token DTOs, and DTO/domain mapping.
+- `cmd/group-service`: composition root. It loads configuration, creates the logger, connects to MongoDB and NATS, ensures repository indexes, registers health and group routes, starts the JetStream expiry command consumer, and handles graceful shutdown.
+- `internal/group-service/handlers`: Echo handlers for path, query, and body extraction, JetStream command handlers, transport validation, service invocation, and error mapping.
+- `internal/group-service/transport`: request/response DTOs, CloudEvent command DTOs, RFC3339 parsing, cursor token DTOs, and DTO/domain mapping.
 - `internal/group-service/services`: use cases, domain validation orchestration, ID generation, clock usage, and transaction-oriented repository calls.
 - `internal/group-service/repositories`: MongoDB documents, indexes, queries, updates, transactions, and document/domain mapping.
 - `internal/domain/group`: framework-independent group models, validation, normalization, cursor models, and stable domain errors.
@@ -97,16 +101,23 @@ Alternatives considered:
 
 ## Common Persistence
 
-`group-service` owns two MongoDB collections:
+`group-service` owns three MongoDB collections:
 
 - `groups`: group definitions, display metadata, grouping rules, timestamps, and group soft-delete state. Details are in [Group API Design](group-service-group.md#groups-collection).
 - `group_individual_members`: explicit members assigned to groups, member expiration, timestamps, and member soft-delete state. Details are in [Group Individual Members API Design](group-service-individual-members.md#group_individual_members-collection).
+- `group_expiry_task`: the active outbox-like expiry task for each group that currently has dynamic grouping rules. Details are in [Group Expiry Command Design](group-service-group-expiry-command.md#group_expiry_task-collection).
 
 Soft-delete rules:
 
 - Active documents have `deleted_at: null`.
 - Soft-deleted documents set `deleted_at` and `updated_at` to the same service-generated timestamp.
-- Deleting a group soft-deletes the active group document and all active individual member documents for that group in one transaction.
+- Deleting a group soft-deletes the active group document, soft-deletes all active individual member documents for that group, and deletes any group expiry tasks for that group in one transaction.
+
+Grouping-rule expiration:
+
+- Active grouping rules have `groups.grouping_rule.expired_at: null` or no `expired_at` field on legacy documents.
+- Expiry command handling sets `groups.grouping_rule.expired_at` and deletes the corresponding `group_expiry_task` in one transaction.
+- Grouping-rule replacement resets `groups.grouping_rule.expired_at` to `null` and replaces the active expiry task when the replacement has dynamic rules.
 
 MongoDB transactions require MongoDB to run as a replica set. The existing local `docker-compose.yml` starts MongoDB with `--replSet rs0`, so the design aligns with local development infrastructure.
 
@@ -143,6 +154,10 @@ Required configuration:
 - `GROUP_SERVICE_HTTP_ADDR`
 - `GROUP_SERVICE_MONGODB_URI`
 - `GROUP_SERVICE_MONGODB_DATABASE`
+- `GROUP_SERVICE_NATS_URL`
+- `GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM`
+- `GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE`
+- `GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT`
 
 Optional configuration with defaults:
 
@@ -150,6 +165,9 @@ Optional configuration with defaults:
 - `GROUP_SERVICE_SHUTDOWN_TIMEOUT`: default `10s`
 - `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS`: default `1000`
 - `GROUP_SERVICE_MAX_GROUPING_RULES`: default `10`
+- `GROUP_SERVICE_GROUP_EXPIRY_COMMAND_FETCH_COUNT`: default `20`
+- `GROUP_SERVICE_GROUP_EXPIRY_COMMAND_MAX_WAIT`: default `5s`
+- `GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE`: default `UTC`
 
 Validation rules:
 
@@ -158,6 +176,9 @@ Validation rules:
 - Shutdown timeout must be positive.
 - `GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS` must be positive.
 - `GROUP_SERVICE_MAX_GROUPING_RULES` must be positive.
+- Group expiry command fetch count must be positive.
+- Group expiry command max wait must be positive.
+- Group expiry bucket timezone must be `UTC` or a supported fixed offset such as `UTC+8`.
 - Missing `.env` files must not fail startup.
 
 Member list pagination uses `internal/shared/pagination` defaults unless implementation later adds explicit group-service pagination configuration:
@@ -168,7 +189,7 @@ Member list pagination uses `internal/shared/pagination` defaults unless impleme
 
 ## Health and Shutdown
 
-`cmd/group-service/main.go` should reuse `internal/shared/health`.
+`cmd/group-service/main.go` should reuse `internal/shared/health` and `internal/shared/eventbus`.
 
 Liveness endpoint:
 
@@ -185,6 +206,8 @@ Rationale:
 - Driver-specific health checks must not be placed in domain or service packages.
 
 The service must support graceful shutdown with a timeout-bound context and must disconnect the MongoDB client during shutdown.
+
+At startup, `cmd/group-service/main.go` should connect to NATS, bind the configured JetStream stream and durable consumer, validate that the configured subject is included in the durable consumer filter, and run the expiry command consumer alongside the HTTP server. Startup should fail fast when the configured stream or durable consumer is missing.
 
 ## REST Client Examples
 
@@ -207,6 +230,7 @@ Detailed test expectations live with each split design:
 
 - [Group API Design](group-service-group.md#testing-strategy)
 - [Group Individual Members API Design](group-service-individual-members.md#testing-strategy)
+- [Group Expiry Command Design](group-service-group-expiry-command.md#testing-strategy)
 
 Repository-wide verification for implementation:
 
@@ -233,8 +257,8 @@ Any implementation plan should be created under `docs/plans/active/` and link ba
 The plan should follow test-driven sequencing:
 
 1. Domain model and validation tests.
-2. Transport request, response, and cursor mapping tests.
+2. Transport request, response, CloudEvent command, and cursor mapping tests.
 3. Service workflow tests.
-4. Repository transaction, soft-delete, read, update, and pagination tests.
-5. Handler route and error mapping tests.
-6. Config, main wiring, health route, and REST Client example updates.
+4. Repository transaction, soft-delete, read, update, pagination, and expiry-task tests.
+5. Handler route, command handler, and error mapping tests.
+6. Config, main wiring, health route, JetStream consumer, and REST Client example updates.
