@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
@@ -15,53 +14,31 @@ type GroupExpiryService interface {
 }
 
 type GroupExpiryEventHandler struct {
-	service      GroupExpiryService
-	expectedType string
-	logger       *slog.Logger
+	handler expiryCommandEventHandler[group.ExpireGroupingRuleCommand, group.ExpireGroupingRuleStatus]
 }
 
 func NewGroupExpiryEventHandler(service GroupExpiryService, expectedType string, logger *slog.Logger) *GroupExpiryEventHandler {
-	if logger == nil {
-		logger = slog.Default()
+	return &GroupExpiryEventHandler{
+		handler: newExpiryCommandEventHandler(
+			expectedType,
+			"group expiry command",
+			logger,
+			transport.ParseGroupExpiryCommandEvent,
+			service.ExpireGroupingRule,
+			groupExpiryCommandFields,
+		),
 	}
-	return &GroupExpiryEventHandler{service: service, expectedType: expectedType, logger: logger}
 }
 
 func (h *GroupExpiryEventHandler) Handle(ctx context.Context, msg eventbus.Message) eventbus.HandleResult {
-	input, err := transport.ParseGroupExpiryCommandEvent(msg.Data, h.expectedType)
-	if err != nil {
-		h.logger.Warn("terminating invalid group expiry command", "err", err, "subject", msg.Subject)
-		return eventbus.HandleResultTerminate
-	}
+	return h.handler.handle(ctx, msg)
+}
 
-	status, err := h.service.ExpireGroupingRule(ctx, input)
-	if err != nil {
-		if errors.Is(err, group.ErrInvalidInput) {
-			h.logger.Warn("terminating invalid group expiry command input",
-				"err", err,
-				"task_id", input.TaskID,
-				"workspace_id", input.WorkspaceID,
-				"group_id", input.GroupID,
-				"expiration_bucket", input.ExpirationBucket,
-			)
-			return eventbus.HandleResultTerminate
-		}
-		h.logger.Warn("retrying group expiry command",
-			"err", err,
-			"task_id", input.TaskID,
-			"workspace_id", input.WorkspaceID,
-			"group_id", input.GroupID,
-			"expiration_bucket", input.ExpirationBucket,
-		)
-		return eventbus.HandleResultRetry
-	}
-
-	h.logger.Info("handled group expiry command",
+func groupExpiryCommandFields(input group.ExpireGroupingRuleCommand) []any {
+	return []any{
 		"task_id", input.TaskID,
 		"workspace_id", input.WorkspaceID,
 		"group_id", input.GroupID,
 		"expiration_bucket", input.ExpirationBucket,
-		"status", status,
-	)
-	return eventbus.HandleResultAck
+	}
 }

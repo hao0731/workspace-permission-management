@@ -55,6 +55,41 @@ func requireInvalidInput(t *testing.T, err error, wantMessage string) {
 	}
 }
 
+type validatableCommand[T any] interface {
+	Normalize() T
+	Validate() error
+}
+
+type commandValidationTestCase[T validatableCommand[T]] struct {
+	name             string
+	command          T
+	wantError        string
+	assertNormalized func(t *testing.T, command T, original T)
+}
+
+func runCommandValidationTests[T validatableCommand[T]](t *testing.T, tests []commandValidationTestCase[T]) {
+	t.Helper()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command := tt.command.Normalize()
+			err := command.Validate()
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				if tt.assertNormalized != nil {
+					tt.assertNormalized(t, command, tt.command)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidInput containing %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestCreateInputValidateRejectsLimitExceededWithOptions(t *testing.T) {
 	tests := []struct {
 		name                 string
@@ -107,11 +142,7 @@ func TestCreateInputValidateRejectsLimitExceededWithOptions(t *testing.T) {
 func TestExpireGroupingRuleCommandValidate(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name      string
-		command   ExpireGroupingRuleCommand
-		wantError string
-	}{
+	tests := []commandValidationTestCase[ExpireGroupingRuleCommand]{
 		{
 			name:      "empty task id",
 			command:   ExpireGroupingRuleCommand{WorkspaceID: "workspace-1", GroupID: "group-1", ExpirationBucket: "2026-05-10"},
@@ -135,29 +166,66 @@ func TestExpireGroupingRuleCommandValidate(t *testing.T) {
 		{
 			name:    "valid",
 			command: ExpireGroupingRuleCommand{TaskID: " task-1 ", WorkspaceID: " workspace-1 ", GroupID: " group-1 ", ExpirationBucket: "2026-05-10"},
+			assertNormalized: func(t *testing.T, command ExpireGroupingRuleCommand, original ExpireGroupingRuleCommand) {
+				t.Helper()
+				if command.TaskID != strings.TrimSpace(original.TaskID) ||
+					command.WorkspaceID != strings.TrimSpace(original.WorkspaceID) ||
+					command.GroupID != strings.TrimSpace(original.GroupID) {
+					t.Fatalf("Normalize() command = %+v", command)
+				}
+			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			command := tt.command.Normalize()
-			err := command.Validate()
-			if tt.wantError == "" {
-				if err != nil {
-					t.Fatalf("Validate() error = %v, want nil", err)
-				}
-				if command.TaskID != strings.TrimSpace(tt.command.TaskID) ||
-					command.WorkspaceID != strings.TrimSpace(tt.command.WorkspaceID) ||
-					command.GroupID != strings.TrimSpace(tt.command.GroupID) {
-					t.Fatalf("Normalize() command = %+v", command)
-				}
-				return
-			}
-			if err == nil || !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("Validate() error = %v, want ErrInvalidInput containing %q", err, tt.wantError)
+	runCommandValidationTests(t, tests)
+}
+
+func TestExpireIndividualMemberCommandValidate(t *testing.T) {
+	t.Parallel()
+
+	assertInvalid := func(name string, command ExpireIndividualMemberCommand, wantError string) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			err := command.Normalize().Validate()
+			if err == nil || !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), wantError) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidInput containing %q", err, wantError)
 			}
 		})
 	}
+
+	assertInvalid(
+		"empty task id",
+		ExpireIndividualMemberCommand{GroupID: "group-1", NTAccount: "user1", ExpirationBucket: "2026-05-10"},
+		"task id is required",
+	)
+	assertInvalid(
+		"empty group id",
+		ExpireIndividualMemberCommand{TaskID: "task-1", NTAccount: "user1", ExpirationBucket: "2026-05-10"},
+		"group id is required",
+	)
+	assertInvalid(
+		"empty nt account",
+		ExpireIndividualMemberCommand{TaskID: "task-1", GroupID: "group-1", ExpirationBucket: "2026-05-10"},
+		"individual member nt account is required",
+	)
+	assertInvalid(
+		"invalid bucket",
+		ExpireIndividualMemberCommand{TaskID: "task-1", GroupID: "group-1", NTAccount: "user1", ExpirationBucket: "2026/05/10"},
+		"expiration bucket must use yyyy-MM-dd",
+	)
+
+	t.Run("valid", func(t *testing.T) {
+		original := ExpireIndividualMemberCommand{TaskID: " task-1 ", GroupID: " group-1 ", NTAccount: " user1 ", ExpirationBucket: "2026-05-10"}
+		command := original.Normalize()
+		if err := command.Validate(); err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+		if command.TaskID != strings.TrimSpace(original.TaskID) ||
+			command.GroupID != strings.TrimSpace(original.GroupID) ||
+			command.NTAccount != strings.TrimSpace(original.NTAccount) {
+			t.Fatalf("Normalize() command = %+v", command)
+		}
+	})
 }
 
 func TestParseExpirationBucketLocation(t *testing.T) {

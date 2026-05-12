@@ -63,3 +63,33 @@ func TestNewGroupExpiryEventbusConfig(t *testing.T) {
 		t.Fatalf("MaxWait = %s, want 7s", got.MaxWait)
 	}
 }
+
+func TestNewIndividualMemberExpiryEventbusConfig(t *testing.T) {
+	cfg := config.Config{
+		IndividualMemberExpiryCommand: config.IndividualMemberExpiryCommandConfig{
+			Stream:     "INDIVIDUAL_MEMBER_EXPIRY",
+			Durable:    "group-service-individual-member-expiry",
+			Subject:    "app.todo.group.individual-member.expiry.process",
+			FetchCount: 30,
+			MaxWait:    9 * time.Second,
+		},
+	}
+
+	got := newIndividualMemberExpiryEventbusConfig(cfg)
+
+	if got.Stream != "INDIVIDUAL_MEMBER_EXPIRY" {
+		t.Fatalf("Stream = %q, want INDIVIDUAL_MEMBER_EXPIRY", got.Stream)
+	}
+	if got.Durable != "group-service-individual-member-expiry" {
+		t.Fatalf("Durable = %q, want group-service-individual-member-expiry", got.Durable)
+	}
+	if len(got.Subjects) != 1 || got.Subjects[0] != "app.todo.group.individual-member.expiry.process" {
+		t.Fatalf("Subjects = %v, want [app.todo.group.individual-member.expiry.process]", got.Subjects)
+	}
+	if got.BatchSize != 30 {
+		t.Fatalf("BatchSize = %d, want 30", got.BatchSize)
+	}
+	if got.MaxWait != 9*time.Second {
+		t.Fatalf("MaxWait = %s, want 9s", got.MaxWait)
+	}
+}

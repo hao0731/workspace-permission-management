@@ -103,10 +103,36 @@ type IndividualMember struct {
 	GroupID        string
 	NTAccount      string
 	ExpirationDate time.Time
+	ExpiredAt      *time.Time
+	ExpiryTask     *IndividualMemberExpiryTask
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      *time.Time
 }
+
+type IndividualMemberExpiryTask struct {
+	ID               string
+	GroupID          string
+	NTAccount        string
+	ExpirationBucket string
+}
+
+type ExpireIndividualMemberCommand struct {
+	TaskID           string
+	GroupID          string
+	NTAccount        string
+	ExpirationBucket string
+}
+
+type ExpireIndividualMemberStatus string
+
+const (
+	ExpireIndividualMemberStatusExpired        ExpireIndividualMemberStatus = "expired"
+	ExpireIndividualMemberStatusStaleTask      ExpireIndividualMemberStatus = "stale_task"
+	ExpireIndividualMemberStatusStaleMember    ExpireIndividualMemberStatus = "stale_member"
+	ExpireIndividualMemberStatusAlreadyExpired ExpireIndividualMemberStatus = "already_expired"
+	ExpireIndividualMemberStatusStaleBucket    ExpireIndividualMemberStatus = "stale_bucket"
+)
 
 type IndividualMemberCursor struct {
 	CreatedAt time.Time
@@ -131,6 +157,7 @@ type UpdateIndividualMemberExpirationInput struct {
 	GroupID        string
 	NTAccount      string
 	ExpirationDate time.Time
+	ExpiryTask     *IndividualMemberExpiryTask
 }
 
 type DeleteIndividualMemberInput struct {
@@ -239,6 +266,22 @@ func (command ExpireGroupingRuleCommand) Normalize() ExpireGroupingRuleCommand {
 	command.TaskID = strings.TrimSpace(command.TaskID)
 	command.WorkspaceID = strings.TrimSpace(command.WorkspaceID)
 	command.GroupID = strings.TrimSpace(command.GroupID)
+	command.ExpirationBucket = strings.TrimSpace(command.ExpirationBucket)
+	return command
+}
+
+func (task IndividualMemberExpiryTask) Normalize() IndividualMemberExpiryTask {
+	task.ID = strings.TrimSpace(task.ID)
+	task.GroupID = strings.TrimSpace(task.GroupID)
+	task.NTAccount = strings.TrimSpace(task.NTAccount)
+	task.ExpirationBucket = strings.TrimSpace(task.ExpirationBucket)
+	return task
+}
+
+func (command ExpireIndividualMemberCommand) Normalize() ExpireIndividualMemberCommand {
+	command.TaskID = strings.TrimSpace(command.TaskID)
+	command.GroupID = strings.TrimSpace(command.GroupID)
+	command.NTAccount = strings.TrimSpace(command.NTAccount)
 	command.ExpirationBucket = strings.TrimSpace(command.ExpirationBucket)
 	return command
 }

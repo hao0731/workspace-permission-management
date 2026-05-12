@@ -10,35 +10,40 @@ import (
 )
 
 type fakeGroupRepository struct {
-	input           group.Group
-	getQuery        group.GetQuery
-	deleteInput     group.DeleteInput
-	updateInput     group.UpdateGroupingRuleInput
-	listQuery       group.ListIndividualMembersQuery
-	addInput        group.AddIndividualMembersInput
-	memberUpdate    group.UpdateIndividualMemberExpirationInput
-	memberDelete    group.DeleteIndividualMemberInput
-	expireInput     group.ExpireGroupingRuleCommand
-	model           *group.Group
-	page            group.IndividualMemberPage
-	addedMembers    []group.IndividualMember
-	expireStatus    group.ExpireGroupingRuleStatus
-	err             error
-	expireErr       error
-	calls           int
-	getCalls        int
-	deleteCalls     int
-	updateCalls     int
-	listCalls       int
-	memberAddCalls  int
-	memberUpdCalls  int
-	memberDelCalls  int
-	deleteTimestamp time.Time
-	updateTimestamp time.Time
-	memberUpdTime   time.Time
-	memberDelTime   time.Time
-	expiredAt       time.Time
-	expireLocation  *time.Location
+	input                group.Group
+	getQuery             group.GetQuery
+	deleteInput          group.DeleteInput
+	updateInput          group.UpdateGroupingRuleInput
+	listQuery            group.ListIndividualMembersQuery
+	addInput             group.AddIndividualMembersInput
+	memberUpdate         group.UpdateIndividualMemberExpirationInput
+	memberDelete         group.DeleteIndividualMemberInput
+	expireInput          group.ExpireGroupingRuleCommand
+	expireMemberInput    group.ExpireIndividualMemberCommand
+	model                *group.Group
+	page                 group.IndividualMemberPage
+	addedMembers         []group.IndividualMember
+	expireStatus         group.ExpireGroupingRuleStatus
+	expireMemberStatus   group.ExpireIndividualMemberStatus
+	err                  error
+	expireErr            error
+	expireMemberErr      error
+	calls                int
+	getCalls             int
+	deleteCalls          int
+	updateCalls          int
+	listCalls            int
+	memberAddCalls       int
+	memberUpdCalls       int
+	memberDelCalls       int
+	deleteTimestamp      time.Time
+	updateTimestamp      time.Time
+	memberUpdTime        time.Time
+	memberDelTime        time.Time
+	expiredAt            time.Time
+	expireLocation       *time.Location
+	memberExpiredAt      time.Time
+	memberExpireLocation *time.Location
 }
 
 func (f *fakeGroupRepository) Create(ctx context.Context, input group.Group) (group.Group, error) {
@@ -118,6 +123,16 @@ func (f *fakeGroupRepository) ExpireGroupingRule(ctx context.Context, input grou
 	return f.expireStatus, f.expireErr
 }
 
+func (f *fakeGroupRepository) ExpireIndividualMember(ctx context.Context, input group.ExpireIndividualMemberCommand, expiredAt time.Time, bucketLocation *time.Location) (group.ExpireIndividualMemberStatus, error) {
+	f.expireMemberInput = input
+	f.memberExpiredAt = expiredAt
+	f.memberExpireLocation = bucketLocation
+	if f.expireMemberStatus == "" {
+		f.expireMemberStatus = group.ExpireIndividualMemberStatusExpired
+	}
+	return f.expireMemberStatus, f.expireMemberErr
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
 }
@@ -149,7 +164,7 @@ func validServiceCreateInput() group.CreateInput {
 
 func TestGroupServiceCreateGroup(t *testing.T) {
 	repository := &fakeGroupRepository{}
-	ids := []string{"group-1", "member-1", "task-1"}
+	ids := []string{"group-1", "member-1", "member-task-1", "task-1"}
 	service := NewGroupService(repository,
 		WithGroupClock(fixedNow),
 		WithGroupIDGenerator(func() string {
@@ -226,6 +241,37 @@ func TestGroupServiceCreateGroupCreatesExpiryTask(t *testing.T) {
 	}
 	if repository.input.GroupingRule.ExpiredAt != nil {
 		t.Fatalf("expired_at = %v, want nil", repository.input.GroupingRule.ExpiredAt)
+	}
+}
+
+func TestGroupServiceCreateGroupCreatesIndividualMemberExpiryTask(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{}
+	now := time.Date(2026, 5, 10, 16, 30, 0, 0, time.UTC)
+	location, err := group.ParseExpirationBucketLocation("UTC+8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewGroupService(repository,
+		WithGroupIDGenerator(sequenceGenerator("group-1", "member-1", "member-task-1", "group-task-1")),
+		WithGroupClock(func() time.Time { return now }),
+		WithIndividualMemberExpiryBucketLocation(location),
+	)
+
+	_, err = service.CreateGroup(context.Background(), validServiceCreateInput())
+	if err != nil {
+		t.Fatalf("CreateGroup() error = %v", err)
+	}
+	task := repository.input.IndividualMembers[0].ExpiryTask
+	if task == nil {
+		t.Fatal("individual member expiry task is nil")
+	}
+	if task.ID != "member-task-1" || task.GroupID != "group-1" || task.NTAccount != "user1" {
+		t.Fatalf("task = %+v, want member-task-1/group-1/user1", task)
+	}
+	if task.ExpirationBucket != "2026-06-01" {
+		t.Fatalf("expiration bucket = %q, want 2026-06-01", task.ExpirationBucket)
 	}
 }
 
@@ -472,6 +518,52 @@ func TestGroupServiceExpireGroupingRule(t *testing.T) {
 	}
 }
 
+func TestGroupServiceExpireIndividualMember(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{expireMemberStatus: group.ExpireIndividualMemberStatusStaleTask}
+	now := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	service := newIndividualMemberExpiryTestService(t, repository, now)
+
+	status, err := service.ExpireIndividualMember(context.Background(), group.ExpireIndividualMemberCommand{
+		TaskID:           "task-1",
+		GroupID:          "group-1",
+		NTAccount:        "user1",
+		ExpirationBucket: "2026-05-10",
+	})
+	if err != nil {
+		t.Fatalf("ExpireIndividualMember() error = %v", err)
+	}
+	if status != group.ExpireIndividualMemberStatusStaleTask {
+		t.Fatalf("status = %s, want stale_task", status)
+	}
+	assertIndividualMemberExpiryCall(t, repository, now)
+}
+
+func newIndividualMemberExpiryTestService(t *testing.T, repository *fakeGroupRepository, now time.Time) *GroupService {
+	t.Helper()
+
+	location, err := group.ParseExpirationBucketLocation("UTC+8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewGroupService(repository,
+		WithGroupClock(func() time.Time { return now }),
+		WithIndividualMemberExpiryBucketLocation(location),
+	)
+}
+
+func assertIndividualMemberExpiryCall(t *testing.T, repository *fakeGroupRepository, now time.Time) {
+	t.Helper()
+
+	if !repository.memberExpiredAt.Equal(now) {
+		t.Fatalf("expiredAt = %s, want %s", repository.memberExpiredAt, now)
+	}
+	if repository.memberExpireLocation.String() != "UTC+08:00" {
+		t.Fatalf("location = %s, want UTC+08:00", repository.memberExpireLocation)
+	}
+}
+
 func TestGroupServiceUpdateGroupingRuleNotFound(t *testing.T) {
 	repository := &fakeGroupRepository{err: group.ErrNotFound}
 	service := NewGroupService(repository, WithGroupClock(fixedNow))
@@ -511,14 +603,9 @@ func TestGroupServiceListIndividualMembers(t *testing.T) {
 
 func TestGroupServiceAddIndividualMembers(t *testing.T) {
 	repository := &fakeGroupRepository{}
-	ids := []string{"member-2"}
 	service := NewGroupService(repository,
 		WithGroupClock(fixedNow),
-		WithGroupIDGenerator(func() string {
-			id := ids[0]
-			ids = ids[1:]
-			return id
-		}),
+		WithGroupIDGenerator(sequenceGenerator("member-2", "member-task-2")),
 	)
 
 	members, err := service.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
@@ -540,6 +627,39 @@ func TestGroupServiceAddIndividualMembers(t *testing.T) {
 	}
 	if !members[0].CreatedAt.Equal(fixedNow()) || !members[0].UpdatedAt.Equal(fixedNow()) {
 		t.Fatalf("timestamps = %s/%s, want fixed now", members[0].CreatedAt, members[0].UpdatedAt)
+	}
+}
+
+func TestGroupServiceAddIndividualMembersCreatesExpiryTask(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{}
+	now := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	service := NewGroupService(repository,
+		WithGroupIDGenerator(sequenceGenerator("member-2", "member-task-2")),
+		WithGroupClock(func() time.Time { return now }),
+	)
+
+	_, err := service.AddIndividualMembers(context.Background(), group.AddIndividualMembersInput{
+		WorkspaceID: "workspace-1",
+		GroupID:     "group-1",
+		IndividualMembers: []group.IndividualMember{{
+			NTAccount:      "user2",
+			ExpirationDate: now.Add(24 * time.Hour),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AddIndividualMembers() error = %v", err)
+	}
+	task := repository.addInput.IndividualMembers[0].ExpiryTask
+	if task == nil {
+		t.Fatal("individual member expiry task is nil")
+	}
+	if task.ID != "member-task-2" || task.GroupID != "group-1" || task.NTAccount != "user2" {
+		t.Fatalf("task = %+v, want member-task-2/group-1/user2", task)
+	}
+	if task.ExpirationBucket != "2026-05-11" {
+		t.Fatalf("expiration bucket = %q, want 2026-05-11", task.ExpirationBucket)
 	}
 }
 
@@ -601,6 +721,34 @@ func TestGroupServiceUpdateIndividualMemberExpiration(t *testing.T) {
 	}
 	if !repository.memberUpdTime.Equal(fixedNow()) {
 		t.Fatalf("updatedAt = %s, want fixed now", repository.memberUpdTime)
+	}
+}
+
+func TestGroupServiceUpdateIndividualMemberExpirationCreatesReplacementTask(t *testing.T) {
+	t.Parallel()
+
+	repository := &fakeGroupRepository{}
+	now := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	service := NewGroupService(repository,
+		WithGroupIDGenerator(sequenceGenerator("member-task-new")),
+		WithGroupClock(func() time.Time { return now }),
+	)
+
+	err := service.UpdateIndividualMemberExpiration(context.Background(), group.UpdateIndividualMemberExpirationInput{
+		WorkspaceID:    "workspace-1",
+		GroupID:        "group-1",
+		NTAccount:      "user2",
+		ExpirationDate: now.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("UpdateIndividualMemberExpiration() error = %v", err)
+	}
+	task := repository.memberUpdate.ExpiryTask
+	if task == nil {
+		t.Fatal("replacement task is nil")
+	}
+	if task.ID != "member-task-new" || task.GroupID != "group-1" || task.NTAccount != "user2" {
+		t.Fatalf("task = %+v, want member-task-new/group-1/user2", task)
 	}
 }
 
