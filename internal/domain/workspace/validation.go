@@ -1,0 +1,134 @@
+package workspace
+
+import (
+	"fmt"
+	"strings"
+)
+
+func (w Workspace) Normalize() Workspace {
+	w.ID = strings.TrimSpace(w.ID)
+	w.Name = strings.TrimSpace(w.Name)
+	w.Description = strings.TrimSpace(w.Description)
+	w.OwnerNTAccount = strings.TrimSpace(w.OwnerNTAccount)
+	return w
+}
+
+func (w Workspace) Validate() error {
+	normalized := w.Normalize()
+	if normalized.ID == "" {
+		return invalidInput("workspace id is required")
+	}
+	if normalized.Name == "" {
+		return invalidInput("workspace name is required")
+	}
+	if normalized.Description == "" {
+		return invalidInput("workspace description is required")
+	}
+	if normalized.OwnerNTAccount == "" {
+		return invalidInput("owner nt account is required")
+	}
+	if normalized.CreatedAt.IsZero() {
+		return invalidInput("created at is required")
+	}
+	if normalized.UpdatedAt.IsZero() {
+		return invalidInput("updated at is required")
+	}
+	return nil
+}
+
+func (r ResourceRequest) Normalize() ResourceRequest {
+	r.ResourceName = strings.TrimSpace(r.ResourceName)
+	return r
+}
+
+func (r ResourceRequest) Validate() error {
+	normalized := r.Normalize()
+	if normalized.ResourceName == "" {
+		return invalidInput("resource name is required")
+	}
+	return nil
+}
+
+func (input CreateInput) Normalize() CreateInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Description = strings.TrimSpace(input.Description)
+	input.OwnerNTAccount = strings.TrimSpace(input.OwnerNTAccount)
+	if input.Documents != nil {
+		normalized := input.Documents.Normalize()
+		input.Documents = &normalized
+	}
+	if input.Tasks != nil {
+		normalized := input.Tasks.Normalize()
+		input.Tasks = &normalized
+	}
+	if input.Drive != nil {
+		normalized := input.Drive.Normalize()
+		input.Drive = &normalized
+	}
+	return input
+}
+
+func (input CreateInput) Validate() error {
+	normalized := input.Normalize()
+	if normalized.Name == "" {
+		return invalidInput("workspace name is required")
+	}
+	if normalized.Description == "" {
+		return invalidInput("workspace description is required")
+	}
+	if normalized.OwnerNTAccount == "" {
+		return invalidInput("owner nt account is required")
+	}
+	if normalized.Documents != nil {
+		if err := normalized.Documents.Validate(); err != nil {
+			return err
+		}
+	}
+	if normalized.Tasks != nil {
+		if err := normalized.Tasks.Validate(); err != nil {
+			return err
+		}
+	}
+	if normalized.Drive != nil {
+		if err := normalized.Drive.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c ResourceCreateCommand) Normalize() ResourceCreateCommand {
+	c.WorkspaceID = strings.TrimSpace(c.WorkspaceID)
+	c.AppName = strings.TrimSpace(c.AppName)
+	c.ResourceName = strings.TrimSpace(c.ResourceName)
+	c.ResourceType = strings.TrimSpace(c.ResourceType)
+	c.EventID = strings.TrimSpace(c.EventID)
+	return c
+}
+
+func (c ResourceCreateCommand) Validate() error {
+	normalized := c.Normalize()
+	if normalized.WorkspaceID == "" {
+		return invalidInput("workspace id is required")
+	}
+	if normalized.AppName == "" {
+		return invalidInput("app name is required")
+	}
+	if normalized.ResourceName == "" {
+		return invalidInput("resource name is required")
+	}
+	if normalized.ResourceType == "" {
+		return invalidInput("resource type is required")
+	}
+	if normalized.EventID == "" {
+		return invalidInput("event id is required")
+	}
+	if normalized.EventTime.IsZero() {
+		return invalidInput("event time is required")
+	}
+	return nil
+}
+
+func invalidInput(message string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidInput, message)
+}

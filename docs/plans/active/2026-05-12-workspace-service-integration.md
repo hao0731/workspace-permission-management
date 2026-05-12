@@ -761,7 +761,7 @@ git commit -m "feat: add mock HR service"
 - Create: `internal/workspace-service/transport/resource_create_event.go`
 - Create: `internal/workspace-service/transport/resource_create_event_test.go`
 
-- [ ] **Step 1: Write failing workspace domain tests**
+- [x] **Step 1: Write failing workspace domain tests**
 
 Create tests for request validation and normalization:
 
@@ -796,7 +796,7 @@ func TestCreateInputNormalize(t *testing.T) {
 
 Create tests for `ResourceCreateCommand.Validate()` requiring workspace ID, app name, resource type, resource name, event ID, and event time.
 
-- [ ] **Step 2: Write failing transport tests**
+- [x] **Step 2: Write failing transport tests**
 
 Add request tests:
 
@@ -856,7 +856,7 @@ func TestNewResourceCreateEvent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -866,7 +866,7 @@ go test ./internal/domain/workspace ./internal/workspace-service/transport
 
 Expected: FAIL because packages are not implemented.
 
-- [ ] **Step 4: Implement workspace domain package**
+- [x] **Step 4: Implement workspace domain package**
 
 Create `internal/domain/workspace/workspace.go` with these models:
 
@@ -924,7 +924,7 @@ Create `errors.go` with `ErrInvalidInput`.
 
 Create `validation.go` with `Normalize()` and `Validate()` methods for `CreateInput`, `ResourceRequest`, `Workspace`, and `ResourceCreateCommand`.
 
-- [ ] **Step 5: Implement workspace transport package**
+- [x] **Step 5: Implement workspace transport package**
 
 Implement request decode:
 
@@ -992,7 +992,7 @@ func NewResourceCreateEvent(command workspace.ResourceCreateCommand) ([]byte, er
 }
 ```
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
