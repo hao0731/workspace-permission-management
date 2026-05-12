@@ -65,8 +65,8 @@ func run() error {
 
 	db := mongoClient.Database(cfg.MongoDB.Database)
 	repository := repositories.NewMongoWorkspaceRepository(db)
-	if err := repository.EnsureIndexes(ctx); err != nil {
-		return err
+	if ensureIndexErr := repository.EnsureIndexes(ctx); ensureIndexErr != nil {
+		return ensureIndexErr
 	}
 
 	nc, err := nats.Connect(cfg.NATS.URL)
