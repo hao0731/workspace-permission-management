@@ -1813,7 +1813,7 @@ git commit -m "feat: wire mock function service"
 **Files:**
 - Modify: `docs/plans/active/2026-05-12-workspace-service-integration.md`
 
-- [ ] **Step 1: Run full backend tests**
+- [x] **Step 1: Run full backend tests**
 
 Run:
 
@@ -1823,7 +1823,7 @@ go test ./...
 
 Expected: PASS for all packages.
 
-- [ ] **Step 2: Run focused service tests**
+- [x] **Step 2: Run focused service tests**
 
 Run:
 
@@ -1834,7 +1834,7 @@ go test ./internal/mock-hr/... ./internal/workspace-service/... ./internal/mock-
 
 Expected: PASS.
 
-- [ ] **Step 3: Run local smoke flow when Docker is available**
+- [x] **Step 3: Run local smoke flow when Docker is available**
 
 Run:
 
@@ -1887,7 +1887,7 @@ Expected logs:
 - `mock-function` logs receipt for documents, tasks, and drive commands.
 - `mock-function` logs successful resource upsert publish for each command.
 
-- [ ] **Step 4: Verify REST examples are aligned**
+- [x] **Step 4: Verify REST examples are aligned**
 
 Open and manually inspect:
 
@@ -1902,7 +1902,7 @@ Expected:
 - `workspaces.http` targets workspace-service's configured local port.
 - Request payloads match the design docs.
 
-- [ ] **Step 5: Mark this plan completed after implementation**
+- [x] **Step 5: Mark this plan completed after implementation**
 
 After all implementation tasks pass and the code is committed, move this plan:
 
@@ -1915,11 +1915,11 @@ Expected: the active plan is moved to `docs/plans/completed/` in version history
 
 ## Self-Review Checklist
 
-- [ ] Shared HR domain and client boundary are covered by Task 1.
-- [ ] Mock HR APIs, fixed display name behavior, shared response envelopes, config, health, and examples are covered by Task 2.
-- [ ] Workspace request/response payloads and resource-create CloudEvent builder are covered by Task 3.
-- [ ] Workspace MongoDB persistence, HR lookup, owner NT account storage, and best-effort publish workflow are covered by Task 4.
-- [ ] Workspace HTTP route, error mapping, config, main wiring, publisher, and REST examples are covered by Task 5.
-- [ ] Mock-function command parsing, upsert event generation, ack/retry/terminate behavior, and logging boundaries are covered by Task 6.
-- [ ] Mock-function config, main wiring, publisher, `.env.example`, and Docker Compose NATS setup are covered by Task 7.
-- [ ] Full verification and plan completion transition are covered by Task 8.
+- [x] Shared HR domain and client boundary are covered by Task 1.
+- [x] Mock HR APIs, fixed display name behavior, shared response envelopes, config, health, and examples are covered by Task 2.
+- [x] Workspace request/response payloads and resource-create CloudEvent builder are covered by Task 3.
+- [x] Workspace MongoDB persistence, HR lookup, owner NT account storage, and best-effort publish workflow are covered by Task 4.
+- [x] Workspace HTTP route, error mapping, config, main wiring, publisher, and REST examples are covered by Task 5.
+- [x] Mock-function command parsing, upsert event generation, ack/retry/terminate behavior, and logging boundaries are covered by Task 6.
+- [x] Mock-function config, main wiring, publisher, `.env.example`, and Docker Compose NATS setup are covered by Task 7.
+- [x] Full verification and plan completion transition are covered by Task 8.
