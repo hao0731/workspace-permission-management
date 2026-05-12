@@ -1634,7 +1634,7 @@ git commit -m "feat: add mock function event workflow"
 - Modify: `.env.example`
 - Modify: `docker-compose.yml`
 
-- [ ] **Step 1: Write failing config, publisher, and main tests**
+- [x] **Step 1: Write failing config, publisher, and main tests**
 
 Config tests must cover:
 
@@ -1674,7 +1674,7 @@ func TestResourceUpsertPublisherPublishesDerivedSubject(t *testing.T) {
 
 Main tests should verify `newResourceCreateEventbusConfig(cfg)` uses `Subjects: []string{"cmd.app.*.resource.create"}` and configured stream, durable, fetch count, and max wait.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1684,7 +1684,7 @@ go test ./internal/mock-function/config ./cmd/mock-function
 
 Expected: FAIL because config, publisher, and main wiring are not implemented.
 
-- [ ] **Step 3: Implement mock-function config and publisher**
+- [x] **Step 3: Implement mock-function config and publisher**
 
 Implement config keys:
 
@@ -1716,7 +1716,7 @@ func (c Config) ResourceCreateConsumerSubject() string
 
 Implement `cmd/mock-function/resource_upsert_publisher.go` with the same shape as `cmd/function-service/resource_deleted_publisher.go`.
 
-- [ ] **Step 4: Implement mock-function main**
+- [x] **Step 4: Implement mock-function main**
 
 `cmd/mock-function/main.go` should:
 
@@ -1731,7 +1731,7 @@ Implement `cmd/mock-function/resource_upsert_publisher.go` with the same shape a
 - Start HTTP server and consumer as sibling goroutines.
 - Close NATS connection on shutdown.
 
-- [ ] **Step 5: Update local config and Docker Compose**
+- [x] **Step 5: Update local config and Docker Compose**
 
 Add `.env.example` sections:
 
@@ -1791,7 +1791,7 @@ nats --server "$$FUNCTION_SERVICE_NATS_URL" stream add "$$MOCK_FUNCTION_RESOURCE
   --defaults
 ```
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
