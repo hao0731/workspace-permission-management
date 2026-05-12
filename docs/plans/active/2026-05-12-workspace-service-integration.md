@@ -1241,7 +1241,7 @@ git commit -m "feat: add workspace persistence workflow"
 - Create: `cmd/workspace-service/main_test.go`
 - Create: `examples/api/workspaces.http`
 
-- [ ] **Step 1: Write failing config and handler tests**
+- [x] **Step 1: Write failing config and handler tests**
 
 Config tests must cover:
 
@@ -1294,7 +1294,7 @@ Handler tests must also cover:
 - `services.ErrHRLookupFailed` returns `502 hr_lookup_failed`.
 - Unexpected service error returns `500 internal_error`.
 
-- [ ] **Step 2: Write failing publisher and main tests**
+- [x] **Step 2: Write failing publisher and main tests**
 
 Publisher test:
 
@@ -1322,7 +1322,7 @@ func TestResourceCreatePublisherPublishesExpectedSubject(t *testing.T) {
 
 Main tests should verify `registerHealthRoutes` serves `/health/liveness`.
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -1332,7 +1332,7 @@ go test ./internal/workspace-service/config ./internal/workspace-service/handler
 
 Expected: FAIL because config, handler, publisher, and main wiring are not implemented.
 
-- [ ] **Step 4: Implement workspace config**
+- [x] **Step 4: Implement workspace config**
 
 Implement `internal/workspace-service/config/config.go` with:
 
@@ -1375,7 +1375,7 @@ func isValidSubjectToken(value string) bool {
 }
 ```
 
-- [ ] **Step 5: Implement handler, publisher, main, and examples**
+- [x] **Step 5: Implement handler, publisher, main, and examples**
 
 Implement handler route:
 
@@ -1410,7 +1410,7 @@ Implement `cmd/workspace-service/main.go`:
 
 Create `examples/api/workspaces.http` using the examples from [Workspace Service API Design](../../designs/workspace-service-api-design.md#rest-client-examples), with `@baseUrl = http://localhost:8083`.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
