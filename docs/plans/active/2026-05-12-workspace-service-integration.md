@@ -1017,7 +1017,7 @@ git commit -m "feat: add workspace domain and transport contracts"
 - Create: `internal/workspace-service/services/workspace_service.go`
 - Create: `internal/workspace-service/services/workspace_service_test.go`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Follow existing Mongo repository test setup patterns from `internal/function-service/repositories/mongo_resource_repository_test.go`.
 
@@ -1057,7 +1057,7 @@ func TestMongoWorkspaceRepositoryCreate(t *testing.T) {
 
 Test `EnsureIndexes` creates the `owner_nt_account + created_at + _id` index.
 
-- [ ] **Step 2: Write failing service workflow tests**
+- [x] **Step 2: Write failing service workflow tests**
 
 Use fakes for repository, HR client, publisher, clock, ID generator, and logger.
 
@@ -1105,7 +1105,7 @@ Also test:
 - Publisher failure returns success and attempts later commands.
 - Commands are attempted in `documents`, `tasks`, `drive` order.
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -1115,7 +1115,7 @@ go test ./internal/workspace-service/repositories ./internal/workspace-service/s
 
 Expected: FAIL because repository and service are not implemented.
 
-- [ ] **Step 4: Implement Mongo workspace repository**
+- [x] **Step 4: Implement Mongo workspace repository**
 
 Implement `internal/workspace-service/repositories/mongo_workspace_repository.go`:
 
@@ -1163,7 +1163,7 @@ func (r *MongoWorkspaceRepository) Create(ctx context.Context, input workspace.W
 }
 ```
 
-- [ ] **Step 5: Implement workspace service**
+- [x] **Step 5: Implement workspace service**
 
 Implement these service types:
 
@@ -1211,7 +1211,7 @@ Define `ErrHRLookupFailed` in the services package:
 var ErrHRLookupFailed = errors.New("hr lookup failed")
 ```
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
