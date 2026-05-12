@@ -129,7 +129,7 @@ Modify these local integration files:
 - Create: `internal/shared/interactions/hr/poc/mock_hr_client.go`
 - Create: `internal/shared/interactions/hr/poc/mock_hr_client_test.go`
 
-- [ ] **Step 1: Write failing HR domain validation tests**
+- [x] **Step 1: Write failing HR domain validation tests**
 
 Create `internal/domain/hr/validation_test.go`:
 
@@ -177,7 +177,7 @@ func TestUserValidateAcceptsValidUser(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Write failing POC HR client tests**
+- [x] **Step 2: Write failing POC HR client tests**
 
 Create `internal/shared/interactions/hr/poc/mock_hr_client_test.go`:
 
@@ -277,7 +277,7 @@ func TestMockHRClientReturnsErrorForNonSuccess(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -287,7 +287,7 @@ go test ./internal/domain/hr ./internal/shared/interactions/hr/poc
 
 Expected: FAIL because the new packages and symbols are not implemented.
 
-- [ ] **Step 4: Implement HR domain and client interface**
+- [x] **Step 4: Implement HR domain and client interface**
 
 Create `internal/domain/hr/errors.go`:
 
@@ -359,7 +359,7 @@ type Client interface {
 }
 ```
 
-- [ ] **Step 5: Implement POC mock HR client**
+- [x] **Step 5: Implement POC mock HR client**
 
 Create `internal/shared/interactions/hr/poc/mock_hr_client.go`:
 
@@ -485,7 +485,7 @@ func normalizeAccounts(ntAccounts []string) ([]string, error) {
 }
 ```
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
