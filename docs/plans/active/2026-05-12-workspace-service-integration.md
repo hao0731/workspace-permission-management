@@ -1443,7 +1443,7 @@ git commit -m "feat: add workspace service API"
 - Create: `internal/mock-function/handlers/resource_create_event_handler.go`
 - Create: `internal/mock-function/handlers/resource_create_event_handler_test.go`
 
-- [ ] **Step 1: Write failing domain and transport tests**
+- [x] **Step 1: Write failing domain and transport tests**
 
 Domain tests must cover:
 
@@ -1485,7 +1485,7 @@ func TestParseResourceCreateCommandEvent(t *testing.T) {
 
 Upsert builder test must assert `type = app.documents.resource.upserted`, `source = mock-function`, `subject = resource_id`, `function_key = documents`, and `resource_tags = []`.
 
-- [ ] **Step 2: Write failing service and handler tests**
+- [x] **Step 2: Write failing service and handler tests**
 
 Service test:
 
@@ -1519,7 +1519,7 @@ Handler tests must cover:
 - Unknown subject returns `eventbus.HandleResultTerminate`.
 - Publisher failure returns `eventbus.HandleResultRetry`.
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -1529,7 +1529,7 @@ go test ./internal/domain/mockfunction ./internal/mock-function/transport ./inte
 
 Expected: FAIL because packages are not implemented.
 
-- [ ] **Step 4: Implement domain and transport**
+- [x] **Step 4: Implement domain and transport**
 
 Create domain models:
 
@@ -1574,7 +1574,7 @@ func NewResourceUpsertEvent(event mockfunction.ResourceUpsertEvent) ([]byte, str
 
 Return both CloudEvent bytes and subject so the publisher can call `eventbus.Producer.Publish(ctx, subject, data)`.
 
-- [ ] **Step 5: Implement service and handler**
+- [x] **Step 5: Implement service and handler**
 
 Service dependencies:
 
@@ -1605,7 +1605,7 @@ Handler behavior:
 - Service publish or unexpected errors as retry.
 - Success as ack.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
