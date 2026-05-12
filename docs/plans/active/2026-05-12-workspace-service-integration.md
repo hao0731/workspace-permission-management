@@ -519,7 +519,7 @@ git commit -m "feat: add shared HR client boundary"
 - Create: `cmd/mock-hr/main_test.go`
 - Create: `examples/api/mock_hr.http`
 
-- [ ] **Step 1: Write failing service and transport tests**
+- [x] **Step 1: Write failing service and transport tests**
 
 Create tests that assert deterministic mock HR behavior:
 
@@ -558,7 +558,7 @@ func TestDecodeUserListRequestRejectsEmptyList(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Write failing handler and config tests**
+- [x] **Step 2: Write failing handler and config tests**
 
 Add handler tests covering:
 
@@ -592,7 +592,7 @@ func TestConfigValidateRequiresHTTPAddr(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -602,7 +602,7 @@ go test ./internal/mock-hr/... ./cmd/mock-hr
 
 Expected: FAIL because `mock-hr` packages are not implemented.
 
-- [ ] **Step 4: Implement mock HR service packages**
+- [x] **Step 4: Implement mock HR service packages**
 
 Implement `internal/mock-hr/services/user_service.go`:
 
@@ -669,7 +669,7 @@ func RegisterRoutes(e *echo.Echo, handler *UserHandler) {
 
 Map `domainhr.ErrInvalidInput` to `400 validation_failed`; map unexpected errors to `500 internal_error`.
 
-- [ ] **Step 5: Implement config, main, and REST examples**
+- [x] **Step 5: Implement config, main, and REST examples**
 
 Implement `internal/mock-hr/config/config.go` following the existing config pattern:
 
@@ -730,7 +730,7 @@ Content-Type: application/json
 }
 ```
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 

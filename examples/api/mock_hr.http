@@ -1,0 +1,28 @@
+@baseUrl = http://localhost:8082
+
+### Get user
+GET {{baseUrl}}/api/v1/users/user1
+
+### Batch get users
+POST {{baseUrl}}/api/v1/user-list
+Content-Type: application/json
+
+{
+  "nt_accounts": ["user1", "user2", "user1"]
+}
+
+### Empty user list returns 400
+POST {{baseUrl}}/api/v1/user-list
+Content-Type: application/json
+
+{
+  "nt_accounts": []
+}
+
+### Empty account returns 400
+POST {{baseUrl}}/api/v1/user-list
+Content-Type: application/json
+
+{
+  "nt_accounts": ["user1", ""]
+}
