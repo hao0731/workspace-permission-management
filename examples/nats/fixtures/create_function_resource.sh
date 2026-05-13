@@ -3,7 +3,6 @@ set -euo pipefail
 
 DEFAULT_WORKSPACE_ID="workspace-1"
 DEFAULT_FUNCTION_KEY="todo"
-DEFAULT_NATS_SUBJECT="app.todo.resource.upserted"
 DEFAULT_NATS_SERVER="nats://workspace-permission-management-nats:4222"
 DEFAULT_DOCKER_NETWORK="workspace_permission_management"
 DEFAULT_NATS_BOX_IMAGE="natsio/nats-box:0.19.3"
@@ -14,7 +13,6 @@ Usage:
   create_function_resource.sh [workspace_id] [function_key]
 
 Environment overrides:
-  FUNCTION_SERVICE_JETSTREAM_SUBJECT  NATS subject and CloudEvent type
   FUNCTION_SERVICE_NATS_URL           NATS server URL reachable from the nats-box container
   DOCKER_NETWORK                      Docker network for the nats-box container
   NATS_BOX_IMAGE                      nats-box image to run
@@ -51,7 +49,7 @@ require_command date
 
 workspace_id="${1:-${DEFAULT_WORKSPACE_ID}}"
 function_key="${2:-${DEFAULT_FUNCTION_KEY}}"
-nats_subject="${FUNCTION_SERVICE_JETSTREAM_SUBJECT:-${DEFAULT_NATS_SUBJECT}}"
+nats_subject="app.${function_key}.resource.upserted"
 nats_server="${FUNCTION_SERVICE_NATS_URL:-${DEFAULT_NATS_SERVER}}"
 docker_network="${DOCKER_NETWORK:-${DEFAULT_DOCKER_NETWORK}}"
 nats_box_image="${NATS_BOX_IMAGE:-${DEFAULT_NATS_BOX_IMAGE}}"

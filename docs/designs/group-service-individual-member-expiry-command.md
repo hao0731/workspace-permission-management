@@ -186,7 +186,7 @@ Default NATS subject and CloudEvent type:
 app.todo.group.individual-member.expiry.process
 ```
 
-The subject remains configurable. The first implementation should use the configured subject as the expected CloudEvent `type`, matching the existing `function-service` and group-expiry event handling pattern.
+The subject remains configurable. The first implementation should use the configured subject as the expected CloudEvent `type`, matching the group-expiry command handling pattern.
 
 CloudEvent envelope:
 

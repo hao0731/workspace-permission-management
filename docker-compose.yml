@@ -87,8 +87,9 @@ services:
       FUNCTION_SERVICE_NATS_URL: nats://nats:4222
       FUNCTION_SERVICE_JETSTREAM_STREAM: ${FUNCTION_SERVICE_JETSTREAM_STREAM:-FUNCTION_RESOURCES}
       FUNCTION_SERVICE_JETSTREAM_DURABLE: ${FUNCTION_SERVICE_JETSTREAM_DURABLE:-function-service-resource-upserter}
-      FUNCTION_SERVICE_JETSTREAM_SUBJECT: ${FUNCTION_SERVICE_JETSTREAM_SUBJECT:-app.todo.resource.upserted}
       FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT: ${FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT:-app.todo.resource.deleted}
+      MOCK_FUNCTION_RESOURCE_CREATE_STREAM: ${MOCK_FUNCTION_RESOURCE_CREATE_STREAM:-RESOURCE_CREATE_COMMANDS}
+      MOCK_FUNCTION_RESOURCE_CREATE_DURABLE: ${MOCK_FUNCTION_RESOURCE_CREATE_DURABLE:-mock-function-resource-create}
       GROUP_SERVICE_NATS_URL: nats://nats:4222
       GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM: ${GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM:-GROUP_EXPIRY}
       GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE: ${GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE:-group-service-expiry}
@@ -105,17 +106,46 @@ services:
 
         if ! nats --server "$$FUNCTION_SERVICE_NATS_URL" stream info "$$FUNCTION_SERVICE_JETSTREAM_STREAM" >/dev/null 2>&1; then
           nats --server "$$FUNCTION_SERVICE_NATS_URL" stream add "$$FUNCTION_SERVICE_JETSTREAM_STREAM" \
-            --subjects "$$FUNCTION_SERVICE_JETSTREAM_SUBJECT,$$FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT" \
+            --subjects "app.*.resource.upserted,$$FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT" \
             --storage file \
             --retention limits \
             --discard old \
             --replicas 1 \
             --defaults
+        else
+          nats --server "$$FUNCTION_SERVICE_NATS_URL" stream edit "$$FUNCTION_SERVICE_JETSTREAM_STREAM" \
+            --subjects "app.*.resource.upserted,$$FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT" \
+            --force
         fi
 
         if ! nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer info "$$FUNCTION_SERVICE_JETSTREAM_STREAM" "$$FUNCTION_SERVICE_JETSTREAM_DURABLE" >/dev/null 2>&1; then
           nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer add "$$FUNCTION_SERVICE_JETSTREAM_STREAM" "$$FUNCTION_SERVICE_JETSTREAM_DURABLE" \
-            --filter "$$FUNCTION_SERVICE_JETSTREAM_SUBJECT" \
+            --filter "app.*.resource.upserted" \
+            --pull \
+            --ack explicit \
+            --deliver all \
+            --replay instant \
+            --max-deliver=-1 \
+            --defaults
+        fi
+
+        if ! nats --server "$$FUNCTION_SERVICE_NATS_URL" stream info "$$MOCK_FUNCTION_RESOURCE_CREATE_STREAM" >/dev/null 2>&1; then
+          nats --server "$$FUNCTION_SERVICE_NATS_URL" stream add "$$MOCK_FUNCTION_RESOURCE_CREATE_STREAM" \
+            --subjects "cmd.app.*.resource.create" \
+            --storage file \
+            --retention limits \
+            --discard old \
+            --replicas 1 \
+            --defaults
+        else
+          nats --server "$$FUNCTION_SERVICE_NATS_URL" stream edit "$$MOCK_FUNCTION_RESOURCE_CREATE_STREAM" \
+            --subjects "cmd.app.*.resource.create" \
+            --force
+        fi
+
+        if ! nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer info "$$MOCK_FUNCTION_RESOURCE_CREATE_STREAM" "$$MOCK_FUNCTION_RESOURCE_CREATE_DURABLE" >/dev/null 2>&1; then
+          nats --server "$$FUNCTION_SERVICE_NATS_URL" consumer add "$$MOCK_FUNCTION_RESOURCE_CREATE_STREAM" "$$MOCK_FUNCTION_RESOURCE_CREATE_DURABLE" \
+            --filter "cmd.app.*.resource.create" \
             --pull \
             --ack explicit \
             --deliver all \

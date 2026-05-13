@@ -9,18 +9,20 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/hao0731/workspace-permission-management/internal/function-service/config"
-	"github.com/hao0731/workspace-permission-management/internal/function-service/handlers"
-	"github.com/hao0731/workspace-permission-management/internal/function-service/repositories"
-	"github.com/hao0731/workspace-permission-management/internal/function-service/services"
-	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
-	"github.com/hao0731/workspace-permission-management/internal/shared/health"
-	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
-	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 	"github.com/nats-io/nats.go"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/hao0731/workspace-permission-management/internal/function-service/config"
+	"github.com/hao0731/workspace-permission-management/internal/function-service/handlers"
+	"github.com/hao0731/workspace-permission-management/internal/function-service/repositories"
+	"github.com/hao0731/workspace-permission-management/internal/function-service/services"
+	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
+	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
+	"github.com/hao0731/workspace-permission-management/internal/shared/health"
+	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
+	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 )
 
 type processIndicator struct{}
@@ -89,10 +91,10 @@ func run() error {
 	)
 	permissionService := services.NewPermissionService(permissionRepository)
 
-	eventHandler := handlers.NewResourceEventHandler(resourceService, cfg.JetStream.Subject, logger)
+	eventHandler := handlers.NewResourceEventHandler(resourceService, logger)
 	consumer, err := eventbus.NewJetStreamConsumer(ctx, nc, eventbus.Config{
 		Stream:    cfg.JetStream.Stream,
-		Subjects:  []string{cfg.JetStream.Subject},
+		Subjects:  []string{transport.ResourceUpsertEventTypePattern},
 		Durable:   cfg.JetStream.Durable,
 		BatchSize: cfg.JetStream.FetchCount,
 		MaxWait:   cfg.JetStream.MaxWait,

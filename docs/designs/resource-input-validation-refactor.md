@@ -1,5 +1,9 @@
 # Resource Input Validation Refactor Design
 
+## Status
+
+Partially superseded for the resource upsert path by [resource-command-event-contracts.md](resource-command-event-contracts.md). Future upsert work should use `ResourceUpsertEvent.Validate()` directly instead of reintroducing `UpsertInput`. The `DeleteInput` and `ListQuery` validation decisions in this document remain current.
+
 ## Background
 
 `function-service` currently validates resource workflow inputs through private helper functions in `internal/function-service/services/resource_service.go`:
@@ -11,6 +15,8 @@
 The input and query types themselves live in `internal/domain/resource`. Moving these checks to `UpsertInput.Validate()`, `DeleteInput.Validate()`, and `ListQuery.Validate()` keeps the business invariant rules close to the framework-independent types that own those invariants.
 
 The existing source design, [function-service.md](function-service.md), describes the service structure and validation behavior but does not name these helper functions. The implementation plans under `docs/plans/` contain historical code snippets that mention the helpers; those plans should be superseded by this design for future validation placement.
+
+The later shared command/event ownership decision is documented in [resource-command-event-contracts.md](resource-command-event-contracts.md). That design extends `internal/domain/resource` with `ResourceCreateCommand` and `ResourceUpsertEvent`; it supersedes `UpsertInput` for the resource upsert workflow. This document remains current for `DeleteInput` and `ListQuery`, while its `UpsertInput` sections are historical context for the validation behavior that should move to `ResourceUpsertEvent.Validate()`.
 
 ## Classification and Policies
 

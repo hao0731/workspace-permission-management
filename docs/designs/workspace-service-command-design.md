@@ -1,0 +1,263 @@
+# Workspace Service Command Design
+
+## Background
+
+When a workspace is created, the request can include optional `documents`, `tasks`, and `drive` sections. Each section asks a configured application function to create an initial resource in the new workspace. `workspace-service` publishes these requests as CloudEvents to NATS JetStream.
+
+Entry point and common service concerns are documented in [Workspace Service Design](workspace-service.md). The create API workflow is documented in [Workspace Service API Design](workspace-service-api-design.md). The shared command and event domain contracts are documented in [Resource Command and Event Domain Contracts](resource-command-event-contracts.md). The mock consumer for these commands is documented in [Mock Function Design](mock-function.md).
+
+## Classification and Policies
+
+This is backend and design documentation work.
+
+Required policies:
+
+- [Backend Architecture Principle](../policies/backend-architecture-principle.md)
+- [Design and Plan Docs Policy](../policies/design-and-plan-docs-policy.md)
+
+Policy alignment:
+
+- CloudEvent command payloads, subjects, and configuration keys are explicit contracts.
+- JetStream types stay out of domain and service logic.
+- Services depend on a consumer-side publisher interface.
+- CloudEvent envelope construction belongs in `internal/workspace-service/transport`.
+- The cross-service resource-create command model belongs in `internal/domain/resource`, not `internal/domain/workspace`.
+- Best-effort publish failures are logged with structured `slog` fields.
+- This design is stored under `docs/designs/` and linked from the workspace-service entry design.
+
+## Goals
+
+- Publish resource-create commands after a workspace document is successfully inserted.
+- Support optional `documents`, `tasks`, and `drive` request sections.
+- Use config to map each section to an application name and resource type.
+- Derive command subjects from the configured application name.
+- Use CloudEvents as the event envelope.
+- Generate command event IDs and timestamps in the service boundary.
+- Build and publish `resource.ResourceCreateCommand` values so the consumer can restore the same domain command type from the CloudEvent.
+- Publish commands through `internal/shared/eventbus`.
+- Log publish failures without failing the workspace create API response.
+
+## Non-Goals
+
+- Do not implement command outbox persistence.
+- Do not retry failed publishes in the first version.
+- Do not expose command publish state in the workspace create response.
+- Do not create resources directly through HTTP calls.
+- Do not validate application names against a registry service.
+- Do not publish commands for omitted request sections.
+
+## Resource Mapping Configuration
+
+Required settings:
+
+- `WORKSPACE_SERVICE_DOCUMENTS_APP_NAME`
+- `WORKSPACE_SERVICE_DOCUMENTS_RESOURCE_TYPE`
+- `WORKSPACE_SERVICE_TASKS_APP_NAME`
+- `WORKSPACE_SERVICE_TASKS_RESOURCE_TYPE`
+- `WORKSPACE_SERVICE_DRIVE_APP_NAME`
+- `WORKSPACE_SERVICE_DRIVE_RESOURCE_TYPE`
+
+Example:
+
+```env
+WORKSPACE_SERVICE_DOCUMENTS_APP_NAME=documents
+WORKSPACE_SERVICE_DOCUMENTS_RESOURCE_TYPE=document
+WORKSPACE_SERVICE_TASKS_APP_NAME=tasks
+WORKSPACE_SERVICE_TASKS_RESOURCE_TYPE=task
+WORKSPACE_SERVICE_DRIVE_APP_NAME=drive
+WORKSPACE_SERVICE_DRIVE_RESOURCE_TYPE=file
+```
+
+Mapping rules:
+
+| Request section | Config app name | Config resource type | Command subject |
+| --- | --- | --- | --- |
+| `documents` | `WORKSPACE_SERVICE_DOCUMENTS_APP_NAME` | `WORKSPACE_SERVICE_DOCUMENTS_RESOURCE_TYPE` | `cmd.app.<APP_NAME>.resource.create` |
+| `tasks` | `WORKSPACE_SERVICE_TASKS_APP_NAME` | `WORKSPACE_SERVICE_TASKS_RESOURCE_TYPE` | `cmd.app.<APP_NAME>.resource.create` |
+| `drive` | `WORKSPACE_SERVICE_DRIVE_APP_NAME` | `WORKSPACE_SERVICE_DRIVE_RESOURCE_TYPE` | `cmd.app.<APP_NAME>.resource.create` |
+
+Validation rules:
+
+- App names must be non-empty after trimming.
+- Resource types must be non-empty after trimming.
+- App names must be valid NATS subject tokens and must not contain `.` or whitespace in the first version.
+- Duplicate configured app names are allowed because each request section may intentionally target the same app, but this should be logged at startup at `warn` level if detected.
+
+## Command CloudEvent Contract
+
+Subject and CloudEvent type:
+
+```txt
+cmd.app.<APP_NAME>.resource.create
+```
+
+Domain contract:
+
+- `internal/domain/resource.ResourceCreateCommand`
+- `Subject()` returns `cmd.app.<APP_NAME>.resource.create`.
+- `Validate()` requires workspace ID, app name, resource name, resource type, event ID, and event time.
+- `workspace-service` serializes this command to a CloudEvent.
+- `mock-function` parses the CloudEvent back into this same command type.
+
+CloudEvent envelope:
+
+```json
+{
+  "specversion": "1.0",
+  "type": "cmd.app.<APP_NAME>.resource.create",
+  "source": "workspace-service",
+  "subject": "<WORKSPACE_ID>",
+  "id": "<UUID>",
+  "time": "2026-05-05T07:31:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "workspace_id": "<WORKSPACE_ID>",
+    "resource_name": "<RESOURCE_NAME>",
+    "resource_type": "<RESOURCE_TYPE>"
+  }
+}
+```
+
+Required envelope fields:
+
+- `specversion`
+- `type`
+- `source`
+- `subject`
+- `id`
+- `time`
+- `datacontenttype`
+- `data`
+
+Required data fields:
+
+- `workspace_id`
+- `resource_name`
+- `resource_type`
+
+Generation rules:
+
+- `specversion` is `1.0`.
+- `type` equals the derived subject.
+- `source` is `workspace-service`.
+- `subject` equals `data.workspace_id`.
+- `id` is generated by `workspace-service`.
+- `time` is generated by `workspace-service`.
+- `datacontenttype` is `application/json`.
+- `data.workspace_id` is the newly created workspace ID.
+- `data.resource_name` is the trimmed request `resource_name`.
+- `data.resource_type` comes from the matching resource mapping config.
+
+## Publish Semantics
+
+Commands are published after the workspace document has been successfully inserted.
+
+Deterministic command order:
+
+1. `documents`, if present.
+2. `tasks`, if present.
+3. `drive`, if present.
+
+Publish behavior:
+
+- Attempt each command independently.
+- A failed publish does not stop attempts for later present sections.
+- A failed publish does not roll back the workspace document.
+- A failed publish does not change the `201 Created` API response.
+- Each failed publish writes an error log.
+- Each successful publish may write an info log for local observability.
+
+Error log fields:
+
+- `err`
+- `workspace_id`
+- `resource_section`
+- `app_name`
+- `resource_type`
+- `resource_name`
+- `subject`
+- `event_id`
+
+Rationale:
+
+- This matches the requested simple flow.
+- The user-facing result is workspace creation, not guaranteed resource provisioning.
+- The trade-off is that resource creation can be missed when NATS publish fails.
+
+## Service Boundary
+
+The workspace service should define a publisher interface at the consumer side, for example:
+
+```go
+type ResourceCreateCommandPublisher interface {
+	PublishResourceCreateCommand(ctx context.Context, command resource.ResourceCreateCommand) error
+}
+```
+
+The concrete implementation can wrap `internal/shared/eventbus.Producer`.
+
+Responsibilities:
+
+- `internal/domain/resource` defines command identity and required fields.
+- `internal/domain/workspace` defines workspace create input and resource request sections, but does not own the cross-service command type.
+- Transport builds CloudEvent JSON bytes from the domain command.
+- Infrastructure publisher calls `eventbus.Producer.Publish`.
+- Service decides which commands to build, logs failures, and controls publish ordering.
+
+This keeps NATS, JetStream, and CloudEvents out of domain logic and keeps handlers free of side effects beyond invoking the service.
+
+`workspace.ResourceSection` stays workspace-service context only. If the service needs section names for deterministic ordering or logging, it should carry the section next to the `resource.ResourceCreateCommand` in an unexported service-local wrapper rather than adding the section to the shared command contract.
+
+## Interaction With Mock Function
+
+`mock-function` consumes the generated subjects:
+
+```txt
+cmd.app.<DOCUMENTS_APP_NAME>.resource.create
+cmd.app.<TASKS_APP_NAME>.resource.create
+cmd.app.<DRIVE_APP_NAME>.resource.create
+```
+
+For each valid command, it logs receipt and publishes a function resource upsert event:
+
+```txt
+app.<APP_NAME>.resource.upserted
+```
+
+The upsert event contract is documented in [Mock Function Design](mock-function.md#resource-upsert-event-contract).
+
+## Testing Strategy
+
+Transport tests:
+
+- Build command CloudEvent with expected subject and type.
+- Build command CloudEvent with `source = "workspace-service"`.
+- Build command CloudEvent with `subject = workspace_id`.
+- Build command CloudEvent with `data.workspace_id`, `data.resource_name`, and `data.resource_type`.
+- Return an error when required command fields are empty.
+- Assert the builder accepts `resource.ResourceCreateCommand`.
+- Assert the CloudEvent can be parsed by `mock-function` back into `resource.ResourceCreateCommand`.
+
+Config tests:
+
+- Load app name and resource type mappings from environment variables.
+- Reject missing app names.
+- Reject missing resource types.
+- Reject app names with whitespace or dots.
+- Accept duplicate app names while preserving section mapping.
+- Reject non-positive publish timeout.
+
+Service tests:
+
+- Omitted optional sections produce no commands.
+- Each present optional section produces one command using the matching app and resource type.
+- Commands are represented as `resource.ResourceCreateCommand`; workspace sections are retained only as service-local context when needed for logs.
+- Command publishing runs after repository insert.
+- Commands are attempted in `documents`, `tasks`, `drive` order.
+- Publish failure logs an error and returns successful create result.
+- Publish failure for one section does not prevent later section publish attempts.
+
+Handler tests:
+
+- A create request with optional resources returns `201` even when a fake publisher fails.
+- The error log path is observable through a test logger or service-level test double.

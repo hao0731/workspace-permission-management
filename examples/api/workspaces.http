@@ -1,0 +1,52 @@
+@baseUrl = http://localhost:8083
+
+### Create workspace without optional resources
+POST {{baseUrl}}/api/v1/workspaces
+Content-Type: application/json
+
+{
+  "name": "Planning Workspace",
+  "description": "Workspace for planning",
+  "owner": "user1"
+}
+
+### Create workspace with all optional resources
+POST {{baseUrl}}/api/v1/workspaces
+Content-Type: application/json
+
+{
+  "name": "Delivery Workspace",
+  "description": "Workspace for delivery",
+  "owner": "user1",
+  "documents": {
+    "resource_name": "Delivery documents"
+  },
+  "tasks": {
+    "resource_name": "Delivery tasks"
+  },
+  "drive": {
+    "resource_name": "Delivery drive"
+  }
+}
+
+### Missing owner returns 400
+POST {{baseUrl}}/api/v1/workspaces
+Content-Type: application/json
+
+{
+  "name": "Missing Owner",
+  "description": "Invalid workspace"
+}
+
+### Empty optional resource name returns 400
+POST {{baseUrl}}/api/v1/workspaces
+Content-Type: application/json
+
+{
+  "name": "Invalid Resource",
+  "description": "Invalid workspace",
+  "owner": "user1",
+  "documents": {
+    "resource_name": ""
+  }
+}

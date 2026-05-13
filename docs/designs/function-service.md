@@ -11,6 +11,7 @@ Related concept definitions are documented in [../concept.md](../concept.md).
 Related designs:
 
 - [Function Resource Permissions Design](function-resource-permissions.md) extends `function-service` with `PUT` and `GET` APIs for storing and retrieving one permission configuration per workspace/function pair in `function_resource_permissions`.
+- [Resource Command and Event Domain Contracts](resource-command-event-contracts.md) defines the shared `resource.ResourceUpsertEvent` contract used directly by the `function-service` upsert workflow.
 
 ## Classification and Policies
 
@@ -26,6 +27,7 @@ Policy alignment:
 - Handlers remain thin and only perform transport parsing, validation, service invocation, and response or ack mapping.
 - Domain and service logic stay independent of Echo, MongoDB, NATS, and JetStream types.
 - Domain resource input/query invariant validation is owned by domain `Validate` methods; transport-only parsing remains in transport packages.
+- Resource-upsert CloudEvents are restored to `resource.ResourceUpsertEvent`, which directly replaces `resource.UpsertInput` for the upsert workflow.
 - MongoDB access is isolated behind repository code.
 - CloudEvents, API payloads, pagination, and MongoDB schema are treated as explicit contracts.
 - This design document is stored under `docs/designs/`.
@@ -34,7 +36,7 @@ Policy alignment:
 
 - Build `function-service` as a resource projection service.
 - Receive resource upsert events from NATS JetStream through `internal/shared/eventbus`.
-- Parse CloudEvents and persist resource state into MongoDB `function_resources`.
+- Parse CloudEvents into `resource.ResourceUpsertEvent` and persist resource state into MongoDB `function_resources`.
 - Support idempotent event handling for JetStream at-least-once delivery.
 - Expose `GET /api/v1/workspaces/:workspace_id/functions/:function_key/resources`.
 - Expose `DELETE /api/v1/workspaces/:workspace_id/functions/:function_key/resources/:resource_id`.
@@ -43,7 +45,8 @@ Policy alignment:
 - Keep the resource-deleted event subject configurable.
 - Treat delete requests for missing documents as idempotent success: return `204`, publish no event, and write a structured log entry.
 - Support cursor-based pagination with `limit` and `next_token`.
-- Keep JetStream stream, upsert subject, durable consumer name, fetch count, and wait settings configurable.
+- Keep JetStream stream, durable consumer name, fetch count, and wait settings configurable.
+- Subscribe to the fixed resource-upsert subject pattern `app.*.resource.upserted`.
 - Enable health endpoints from `internal/shared/health` in `cmd/function-service/main.go`.
 
 ## Non-Goals
@@ -115,12 +118,20 @@ Rationale:
 NATS subject and CloudEvent type:
 
 ```txt
-app.todo.resource.upserted
+app.<FUNCTION_KEY>.resource.upserted
 ```
 
-The subject remains configurable, but the default deployment contract is `app.todo.resource.upserted`.
+`function-service` subscribes to the fixed JetStream filter `app.*.resource.upserted`. This subject is not function-service runtime config; the wildcard token represents one concrete function key, such as `app.documents.resource.upserted`.
 
 Implementation should parse the CloudEvent envelope with the CloudEvents Go SDK identified by the backend policy instead of hand-rolling envelope parsing. This is an intentional dependency because CloudEvents are part of the repository's backend technology stack and are the public event contract for brokered events.
+
+Domain contract:
+
+- `internal/domain/resource.ResourceUpsertEvent`
+- `Subject()` returns `app.<FUNCTION_KEY>.resource.upserted`.
+- `Validate()` requires resource ID, display name, resource type, function key, workspace ID, event ID, event time, and non-blank tags.
+- This type is the direct service and repository input for resource upsert behavior.
+- Producers such as `mock-function` build this domain event before CloudEvent serialization, and `function-service` parses the CloudEvent back into the same domain event type before invoking the upsert workflow.
 
 CloudEvent envelope:
 
@@ -167,7 +178,8 @@ Required data fields:
 Validation rules:
 
 - `specversion` must be `1.0`.
-- `type` must match the configured subject, whose default is `app.todo.resource.upserted`.
+- `type` must be a concrete subject matching `app.*.resource.upserted`.
+- `type` must match `app.<data.function_key>.resource.upserted`.
 - `datacontenttype` must be `application/json`.
 - `time` must be a valid timestamp.
 - `data.resource_id`, `workspace_id`, `function_key`, `display_name`, and `resource_type` must be non-empty strings.
@@ -309,26 +321,28 @@ See shared pagination refactor design: [shared-pagination-helper-refactor.md](sh
 Responsibilities:
 
 - `cmd/function-service/main.go`: composition root, config loading, MongoDB and NATS setup, JetStream consumer and producer setup, Echo setup, health route registration, resource route registration, eventbus consumer startup, goroutine lifecycle, and graceful shutdown.
-- `internal/domain/resource`: framework-independent resource model, resource input/query validation methods, and domain errors.
+- `internal/domain/resource`: framework-independent resource model, resource command/event contracts, list/delete input validation methods, and domain errors.
 - `internal/function-service/config`: environment and `.env` backed config loading through viper, including validation and defaults for optional settings.
 - `internal/shared/environment`: shared runtime environment contract (`Development`, `Production`), `IsValidEnvironment`, and `ErrInvalidEnv` for validation consistency across services.
 - `internal/shared/logger`: shared `logger.New(environment, ...options)` factory; supports environment-aware handler selection and optional `WithLevel` log level override.
-- `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert query, delete query, and list query.
-- `internal/function-service/services`: resource upsert, list, and delete workflows. Services call domain input/query `Validate` methods before repositories or publishers, define consumer-side repository and publisher interfaces, and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
+- `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert event persistence, delete query, and list query.
+- `internal/function-service/services`: resource upsert, list, and delete workflows. Services call domain event/input/query `Validate` methods before repositories or publishers, define consumer-side repository and publisher interfaces, and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
 - `internal/function-service/handlers`: Echo HTTP handler, route registration, and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.
-- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, resource-deleted event DTO construction, and DTO/domain mapping. Pagination query parsing and cursor token encode/decode are provided by the shared pagination package (see [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md)).
+- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, resource-upsert event parsing to `resource.ResourceUpsertEvent`, resource-deleted event DTO construction, and DTO/domain mapping. Pagination query parsing and cursor token encode/decode are provided by the shared pagination package (see [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md)).
 
 ## Resource Input Validation Boundary
 
-Resource input and query invariant validation is defined in [resource-input-validation-refactor.md](resource-input-validation-refactor.md).
+Resource upsert event ownership is defined in [resource-command-event-contracts.md](resource-command-event-contracts.md). Delete and list input validation, plus the historical upsert-input refactor context, is defined in [resource-input-validation-refactor.md](resource-input-validation-refactor.md).
 
 The domain package owns:
 
-- `UpsertInput.Validate()`
+- `ResourceUpsertEvent.Validate()`
 - `DeleteInput.Validate()`
 - `ListQuery.Validate()`
 
-These methods validate framework-independent service workflow invariants such as non-empty resource identity fields, required upsert fields, non-empty resource tags, non-zero event time, positive list limit, and valid cursor fields. They must return errors wrapping `resource.ErrInvalidInput` so HTTP and event handlers can keep their existing error mapping.
+These methods validate framework-independent service workflow invariants such as non-empty resource identity fields, required upsert event fields, non-empty resource tags, non-zero event time, positive list limit, and valid cursor fields. They must return errors wrapping `resource.ErrInvalidInput` so HTTP and event handlers can keep their existing error mapping.
+
+`ResourceUpsertEvent` replaces `UpsertInput`; services and repositories should not introduce a second upsert input struct for the same resource lifecycle message.
 
 Transport packages continue to own transport-specific parsing and validation, including CloudEvent envelope validation and DTO/domain mapping. Pagination query parsing and cursor token encode/decode are migrated to the shared helper package as documented in [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md).
 
@@ -338,7 +352,7 @@ Services should call the domain `Validate` methods before invoking repositories 
 
 Configuration must come from environment variables, with `.env` support allowed for local development.
 
-JetStream stream and durable consumer provisioning is outside the first version of `function-service`. The service binds to the configured stream and durable consumer through `internal/shared/eventbus` during startup and fails fast when they do not exist or when the consumer filter does not include the configured subject.
+JetStream stream and durable consumer provisioning is outside the first version of `function-service`. The service binds to the configured stream and durable consumer through `internal/shared/eventbus` during startup and fails fast when they do not exist or when the consumer filter does not include `app.*.resource.upserted`.
 
 Required settings:
 
@@ -348,7 +362,6 @@ Required settings:
 - `FUNCTION_SERVICE_NATS_URL`
 - `FUNCTION_SERVICE_JETSTREAM_STREAM`
 - `FUNCTION_SERVICE_JETSTREAM_DURABLE`
-- `FUNCTION_SERVICE_JETSTREAM_SUBJECT`
 
 Optional settings:
 
@@ -370,7 +383,7 @@ Repository environment files:
 
 Deployment defaults:
 
-- `FUNCTION_SERVICE_JETSTREAM_SUBJECT=app.todo.resource.upserted`
+- Resource-upsert consumer filter: `app.*.resource.upserted`
 - `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT=app.todo.resource.deleted`
 
 Config validation:
@@ -394,7 +407,7 @@ Startup responsibilities:
 4. Initialize MongoDB indexes for `function_resources`.
 5. Connect to NATS.
 6. Create an `internal/shared/eventbus` JetStream producer for resource-deleted events.
-7. Create an `internal/shared/eventbus` JetStream consumer using configured stream, durable, subject, fetch count, and wait duration.
+7. Create an `internal/shared/eventbus` JetStream consumer using configured stream, durable, fetch count, wait duration, and the fixed `app.*.resource.upserted` filter.
 8. Create Echo and register:
    - `/health/liveness` from `internal/shared/health`.
    - resource API routes.
@@ -612,6 +625,7 @@ Repository tests:
 Event handler tests:
 
 - Valid CloudEvent returns Ack.
+- Valid CloudEvent is parsed into `resource.ResourceUpsertEvent` and passed directly to the upsert service.
 - Invalid JSON returns Terminate.
 - Missing required CloudEvent field returns Terminate.
 - Invalid event data returns Terminate.
@@ -691,7 +705,7 @@ Additional verification may include `go vet ./...` if the implementation plan to
    - Trade-off: Clients cannot distinguish "workspace/function missing" from "no resources projected" through this endpoint.
 
 6. Bind to pre-provisioned JetStream stream and durable consumer.
-   - Rationale: The existing `internal/shared/eventbus` consumer binds and validates configured stream, durable, and subject contracts at startup.
+   - Rationale: The existing `internal/shared/eventbus` consumer binds and validates the configured stream, durable, and fixed resource-upsert subject contract at startup.
    - Trade-off: Local and deployment environments must provision JetStream resources before starting `function-service`.
 
 7. Return `204` for missing delete targets and publish no event.
@@ -710,9 +724,13 @@ Additional verification may include `go vet ./...` if the implementation plan to
    - Rationale: This follows the existing upsert event style and keeps subject/type configuration simple.
    - Trade-off: Changing the configured subject also changes the CloudEvent type contract and must be coordinated with consumers.
 
-11. Put resource input/query invariant validation on domain `Validate` methods.
-   - Rationale: `UpsertInput`, `DeleteInput`, and `ListQuery` carry framework-independent service workflow values, so their invariant checks should be discoverable from those types and reusable across service entry points.
+11. Put resource event/input/query invariant validation on domain `Validate` methods.
+   - Rationale: `ResourceUpsertEvent`, `DeleteInput`, and `ListQuery` carry framework-independent service workflow values, so their invariant checks should be discoverable from those types and reusable across service entry points.
    - Trade-off: The domain package owns basic string/time validation helpers, while transport packages still own HTTP and CloudEvent parsing concerns.
+
+12. Restore resource-upsert CloudEvents into `resource.ResourceUpsertEvent`.
+   - Rationale: Producers and consumers share one resource-domain event contract, and the function-service upsert workflow can use that event directly without duplicating an `UpsertInput` struct.
+   - Trade-off: Repositories receive event metadata such as `EventID`; persistence mapping should ignore metadata it does not store.
 
 ## Implementation Plan Notes
 

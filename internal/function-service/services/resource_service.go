@@ -11,7 +11,7 @@ import (
 )
 
 type ResourceRepository interface {
-	Upsert(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error)
+	Upsert(ctx context.Context, event resource.ResourceUpsertEvent) (resource.UpsertStatus, error)
 	List(ctx context.Context, query resource.ListQuery) (resource.Page, error)
 	Delete(ctx context.Context, input resource.DeleteInput) (resource.DeleteStatus, error)
 }
@@ -65,11 +65,11 @@ func NewResourceService(repository ResourceRepository, opts ...Option) *Resource
 	return service
 }
 
-func (s *ResourceService) UpsertResource(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error) {
-	if err := input.Validate(); err != nil {
+func (s *ResourceService) UpsertResource(ctx context.Context, event resource.ResourceUpsertEvent) (resource.UpsertStatus, error) {
+	if err := event.Validate(); err != nil {
 		return "", err
 	}
-	status, err := s.repository.Upsert(ctx, input)
+	status, err := s.repository.Upsert(ctx, event)
 	if err != nil {
 		return "", fmt.Errorf("upsert resource: %w", err)
 	}
