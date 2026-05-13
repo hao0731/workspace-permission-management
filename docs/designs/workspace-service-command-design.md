@@ -4,7 +4,7 @@
 
 When a workspace is created, the request can include optional `documents`, `tasks`, and `drive` sections. Each section asks a configured application function to create an initial resource in the new workspace. `workspace-service` publishes these requests as CloudEvents to NATS JetStream.
 
-Entry point and common service concerns are documented in [Workspace Service Design](workspace-service.md). The create API workflow is documented in [Workspace Service API Design](workspace-service-api-design.md). The mock consumer for these commands is documented in [Mock Function Design](mock-function.md).
+Entry point and common service concerns are documented in [Workspace Service Design](workspace-service.md). The create API workflow is documented in [Workspace Service API Design](workspace-service-api-design.md). The shared command and event domain contracts are documented in [Resource Command and Event Domain Contracts](resource-command-event-contracts.md). The mock consumer for these commands is documented in [Mock Function Design](mock-function.md).
 
 ## Classification and Policies
 
@@ -21,6 +21,7 @@ Policy alignment:
 - JetStream types stay out of domain and service logic.
 - Services depend on a consumer-side publisher interface.
 - CloudEvent envelope construction belongs in `internal/workspace-service/transport`.
+- The cross-service resource-create command model belongs in `internal/domain/resource`, not `internal/domain/workspace`.
 - Best-effort publish failures are logged with structured `slog` fields.
 - This design is stored under `docs/designs/` and linked from the workspace-service entry design.
 
@@ -32,6 +33,7 @@ Policy alignment:
 - Derive command subjects from the configured application name.
 - Use CloudEvents as the event envelope.
 - Generate command event IDs and timestamps in the service boundary.
+- Build and publish `resource.ResourceCreateCommand` values so the consumer can restore the same domain command type from the CloudEvent.
 - Publish commands through `internal/shared/eventbus`.
 - Log publish failures without failing the workspace create API response.
 
@@ -88,6 +90,14 @@ Subject and CloudEvent type:
 ```txt
 cmd.app.<APP_NAME>.resource.create
 ```
+
+Domain contract:
+
+- `internal/domain/resource.ResourceCreateCommand`
+- `Subject()` returns `cmd.app.<APP_NAME>.resource.create`.
+- `Validate()` requires workspace ID, app name, resource name, resource type, event ID, and event time.
+- `workspace-service` serializes this command to a CloudEvent.
+- `mock-function` parses the CloudEvent back into this same command type.
 
 CloudEvent envelope:
 
@@ -180,7 +190,7 @@ The workspace service should define a publisher interface at the consumer side, 
 
 ```go
 type ResourceCreateCommandPublisher interface {
-	PublishResourceCreateCommand(ctx context.Context, command workspace.ResourceCreateCommand) error
+	PublishResourceCreateCommand(ctx context.Context, command resource.ResourceCreateCommand) error
 }
 ```
 
@@ -188,12 +198,15 @@ The concrete implementation can wrap `internal/shared/eventbus.Producer`.
 
 Responsibilities:
 
-- Domain models define command identity and required fields.
+- `internal/domain/resource` defines command identity and required fields.
+- `internal/domain/workspace` defines workspace create input and resource request sections, but does not own the cross-service command type.
 - Transport builds CloudEvent JSON bytes from the domain command.
 - Infrastructure publisher calls `eventbus.Producer.Publish`.
 - Service decides which commands to build, logs failures, and controls publish ordering.
 
 This keeps NATS, JetStream, and CloudEvents out of domain logic and keeps handlers free of side effects beyond invoking the service.
+
+`workspace.ResourceSection` stays workspace-service context only. If the service needs section names for deterministic ordering or logging, it should carry the section next to the `resource.ResourceCreateCommand` in an unexported service-local wrapper rather than adding the section to the shared command contract.
 
 ## Interaction With Mock Function
 
@@ -222,6 +235,8 @@ Transport tests:
 - Build command CloudEvent with `subject = workspace_id`.
 - Build command CloudEvent with `data.workspace_id`, `data.resource_name`, and `data.resource_type`.
 - Return an error when required command fields are empty.
+- Assert the builder accepts `resource.ResourceCreateCommand`.
+- Assert the CloudEvent can be parsed by `mock-function` back into `resource.ResourceCreateCommand`.
 
 Config tests:
 
@@ -236,6 +251,7 @@ Service tests:
 
 - Omitted optional sections produce no commands.
 - Each present optional section produces one command using the matching app and resource type.
+- Commands are represented as `resource.ResourceCreateCommand`; workspace sections are retained only as service-local context when needed for logs.
 - Command publishing runs after repository insert.
 - Commands are attempted in `documents`, `tasks`, `drive` order.
 - Publish failure logs an error and returns successful create result.

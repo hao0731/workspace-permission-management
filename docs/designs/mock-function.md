@@ -9,6 +9,7 @@ Related designs:
 - [Workspace Service Design](workspace-service.md)
 - [Workspace Service Command Design](workspace-service-command-design.md)
 - [Function Service Design](function-service.md)
+- [Resource Command and Event Domain Contracts](resource-command-event-contracts.md)
 
 ## Classification and Policies
 
@@ -25,6 +26,8 @@ Policy alignment:
 - NATS and JetStream types stay in infrastructure and composition-root code.
 - Command handlers parse CloudEvents, classify ack/retry/terminate outcomes, and delegate publish behavior through service boundaries.
 - CloudEvent DTOs and mappers belong in `internal/mock-function/transport`.
+- Shared resource-create command and resource-upsert event models belong in `internal/domain/resource`.
+- `internal/domain/mockfunction` must not be introduced or retained; mock-function-specific behavior belongs in `internal/mock-function/*`.
 - This design is stored under `docs/designs/`.
 
 ## Goals
@@ -40,6 +43,7 @@ Policy alignment:
 - Set `data.resource_type` to the command `data.resource_type`.
 - Set `data.resource_tags` to an empty array.
 - Set `data.workspace_id` to the command `data.workspace_id`.
+- Use `resource.ResourceCreateCommand` and `resource.ResourceUpsertEvent` from `internal/domain/resource` as the domain contracts on both sides of CloudEvent transport.
 - Use `internal/shared/health` for liveness.
 
 ## Non-Goals
@@ -61,6 +65,7 @@ internal/mock-function/config
 internal/mock-function/handlers
 internal/mock-function/services
 internal/mock-function/transport
+internal/domain/resource
 ```
 
 Responsibilities:
@@ -70,8 +75,9 @@ Responsibilities:
 - `internal/mock-function/handlers`: JetStream command handler that parses the command event, logs message handling, invokes the service, and returns ack/retry/terminate outcomes.
 - `internal/mock-function/services`: command handling workflow, resource ID generation, clock usage, and upsert event publishing.
 - `internal/mock-function/transport`: CloudEvent command parser and resource upsert event builder.
+- `internal/domain/resource`: shared resource command and event contract types, validation, and subject helpers.
 
-No domain package is required for the first version unless implementation needs stable domain errors or reusable command models. If added, it should be `internal/domain/mockfunction` or another clearly named package that does not depend on infrastructure packages.
+`mock-function` must not define a service-specific domain package for these contracts. `ResourceCreateCommand` and `ResourceUpsertEvent` are resource-domain contracts because they are created by one service, serialized through CloudEvents, and restored by another service.
 
 ## Configuration
 
@@ -125,6 +131,14 @@ Consumed subject and CloudEvent type:
 cmd.app.<APP_NAME>.resource.create
 ```
 
+Domain contract:
+
+- `internal/domain/resource.ResourceCreateCommand`
+- `Subject()` returns `cmd.app.<APP_NAME>.resource.create`.
+- `Validate()` wraps `resource.ErrInvalidInput` for missing workspace ID, app name, resource name, resource type, event ID, or event time.
+- `workspace-service` builds this type before CloudEvent serialization.
+- `mock-function` parses the CloudEvent back into this same type.
+
 CloudEvent envelope:
 
 ```json
@@ -165,6 +179,14 @@ app.<APP_NAME>.resource.upserted
 ```
 
 This matches the existing `function-service` resource upsert ingestion pattern documented in [Function Service Design](function-service.md#resource-upsert-event-contract).
+
+Domain contract:
+
+- `internal/domain/resource.ResourceUpsertEvent`
+- `Subject()` returns `app.<FUNCTION_KEY>.resource.upserted`.
+- `Validate()` wraps `resource.ErrInvalidInput` for missing resource ID, display name, resource type, function key, workspace ID, event ID, event time, or blank tags.
+- `mock-function` builds this type before CloudEvent serialization.
+- `function-service` parses the CloudEvent back into this same type and uses it directly as the upsert workflow input.
 
 CloudEvent envelope:
 
@@ -210,10 +232,12 @@ For each received message:
 1. Parse the CloudEvent envelope.
 2. Validate the message subject, CloudEvent type, subject, and data payload.
 3. Derive `<APP_NAME>` from the matched configured command subject.
-4. Log command receipt with structured fields.
-5. Generate a random resource UUID and CloudEvent ID.
-6. Publish the resource upsert event to `app.<APP_NAME>.resource.upserted`.
-7. Ack the command when publish succeeds.
+4. Restore the message to `resource.ResourceCreateCommand`.
+5. Log command receipt with structured fields.
+6. Generate a random resource UUID and CloudEvent ID.
+7. Build `resource.ResourceUpsertEvent`.
+8. Publish the resource upsert event to `app.<APP_NAME>.resource.upserted`.
+9. Ack the command when publish succeeds.
 
 Error classification:
 
@@ -278,12 +302,13 @@ Config tests:
 
 Transport tests:
 
-- Parse valid resource-create command.
+- Parse valid resource-create command into `resource.ResourceCreateCommand`.
 - Reject command whose CloudEvent type does not match message subject.
 - Reject command whose subject does not match `data.workspace_id`.
 - Reject unknown command subject.
 - Reject empty `workspace_id`, `resource_name`, or `resource_type`.
-- Build resource upsert event matching the existing function-service contract.
+- Build resource upsert event from `resource.ResourceUpsertEvent` matching the existing function-service contract.
+- Preserve round-trip compatibility with `function-service` parsing of the upsert CloudEvent.
 
 Service tests:
 

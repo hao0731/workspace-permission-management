@@ -8,6 +8,7 @@ This document is the entry point for `workspace-service`. Focused endpoint and c
 
 - [Workspace Service API Design](workspace-service-api-design.md): `POST /api/v1/workspaces`, workspace persistence, HR lookup, response contract, and error mapping.
 - [Workspace Service Command Design](workspace-service-command-design.md): config-driven resource-create command publishing for `documents`, `tasks`, and `drive`.
+- [Resource Command and Event Domain Contracts](resource-command-event-contracts.md): shared resource command and event types used by workspace, mock-function, and function services.
 
 Related designs:
 
@@ -32,6 +33,7 @@ Policy alignment:
 - Handlers stay thin and only parse request bodies, invoke services, and render responses or mapped errors.
 - Request and response DTOs belong in `internal/workspace-service/transport`.
 - Workspace domain types and invariants stay independent of Echo, MongoDB, NATS, JetStream, and HR HTTP client details.
+- Cross-service resource command contracts belong in `internal/domain/resource`; workspace sections remain workspace-service context and are not serialized.
 - MongoDB access is isolated in `internal/workspace-service/repositories`.
 - JetStream publishing is exposed to services through a consumer-side interface; NATS and JetStream types stay out of service and domain logic.
 - HR lookups use `internal/shared/interactions/hr.Client`; the concrete mock HR HTTP client lives under `internal/shared/interactions/hr/poc`.
@@ -80,6 +82,7 @@ internal/workspace-service/repositories
 internal/workspace-service/services
 internal/workspace-service/transport
 internal/domain/workspace
+internal/domain/resource
 ```
 
 Responsibilities:
@@ -90,7 +93,8 @@ Responsibilities:
 - `internal/workspace-service/transport`: request DTOs, response DTOs, CloudEvent command builders, and DTO/domain mappers.
 - `internal/workspace-service/services`: create-workspace workflow, owner HR lookup orchestration, ID and clock usage, workspace repository calls, and best-effort command publishing orchestration.
 - `internal/workspace-service/repositories`: MongoDB documents, indexes, insert behavior, and document/domain mapping.
-- `internal/domain/workspace`: workspace model, create input, command request model, validation, and stable domain errors.
+- `internal/domain/workspace`: workspace model, create input, workspace resource request sections, validation, and stable domain errors.
+- `internal/domain/resource`: shared `ResourceCreateCommand` contract used for command publishing.
 
 The service also depends on shared packages:
 
@@ -214,6 +218,7 @@ Any implementation plan should be created under `docs/plans/active/` and link ba
 
 - [Workspace Service API Design](workspace-service-api-design.md)
 - [Workspace Service Command Design](workspace-service-command-design.md)
+- [Resource Command and Event Domain Contracts](resource-command-event-contracts.md)
 - [Mock HR Design](mock-hr.md)
 - [Mock Function Design](mock-function.md)
 
