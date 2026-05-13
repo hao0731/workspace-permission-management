@@ -5,13 +5,13 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/mockfunction"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/mock-function/transport"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 )
 
 type ResourceCreateService interface {
-	HandleResourceCreate(ctx context.Context, command mockfunction.ResourceCreateCommand) error
+	HandleResourceCreate(ctx context.Context, command resource.ResourceCreateCommand) error
 }
 
 type ResourceCreateEventHandler struct {
@@ -38,7 +38,7 @@ func (h *ResourceCreateEventHandler) Handle(ctx context.Context, msg eventbus.Me
 		return eventbus.HandleResultTerminate
 	}
 	if err := h.service.HandleResourceCreate(ctx, command); err != nil {
-		if errors.Is(err, mockfunction.ErrInvalidInput) {
+		if errors.Is(err, resource.ErrInvalidInput) {
 			h.logger.Warn("terminating invalid resource create command input",
 				"err", err,
 				"workspace_id", command.WorkspaceID,

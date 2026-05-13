@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/mockfunction"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 )
 
 type ResourceUpsertPublisher interface {
-	PublishResourceUpsert(ctx context.Context, event mockfunction.ResourceUpsertEvent) error
+	PublishResourceUpsert(ctx context.Context, event resource.ResourceUpsertEvent) error
 }
 
 type Option func(*ResourceService)
@@ -63,7 +63,7 @@ func NewResourceService(publisher ResourceUpsertPublisher, opts ...Option) *Reso
 	return service
 }
 
-func (s *ResourceService) HandleResourceCreate(ctx context.Context, command mockfunction.ResourceCreateCommand) error {
+func (s *ResourceService) HandleResourceCreate(ctx context.Context, command resource.ResourceCreateCommand) error {
 	command = command.Normalize()
 	if err := command.Validate(); err != nil {
 		return err
@@ -74,7 +74,7 @@ func (s *ResourceService) HandleResourceCreate(ctx context.Context, command mock
 		"resource_name", command.ResourceName,
 		"resource_type", command.ResourceType,
 	)
-	event := mockfunction.ResourceUpsertEvent{
+	event := resource.ResourceUpsertEvent{
 		ResourceID:   s.idGenerator(),
 		DisplayName:  command.ResourceName,
 		ResourceType: command.ResourceType,

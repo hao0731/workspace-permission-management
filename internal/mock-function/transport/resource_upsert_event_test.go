@@ -7,11 +7,11 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/mockfunction"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 )
 
 func TestNewResourceUpsertEvent(t *testing.T) {
-	data, subject, err := NewResourceUpsertEvent(mockfunction.ResourceUpsertEvent{
+	data, subject, err := NewResourceUpsertEvent(resource.ResourceUpsertEvent{
 		ResourceID:   "resource-1",
 		DisplayName:  "Docs",
 		ResourceType: "document",
@@ -48,7 +48,7 @@ func TestNewResourceUpsertEvent(t *testing.T) {
 }
 
 func TestNewResourceUpsertEventRejectsInvalidEvent(t *testing.T) {
-	_, _, err := NewResourceUpsertEvent(mockfunction.ResourceUpsertEvent{})
+	_, _, err := NewResourceUpsertEvent(resource.ResourceUpsertEvent{})
 	if err == nil {
 		t.Fatal("NewResourceUpsertEvent() error = nil, want error")
 	}

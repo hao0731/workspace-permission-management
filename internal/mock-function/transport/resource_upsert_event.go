@@ -6,7 +6,7 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/mockfunction"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 )
 
 type resourceUpsertData struct {
@@ -18,7 +18,7 @@ type resourceUpsertData struct {
 	WorkspaceID  string   `json:"workspace_id"`
 }
 
-func NewResourceUpsertEvent(input mockfunction.ResourceUpsertEvent) ([]byte, string, error) {
+func NewResourceUpsertEvent(input resource.ResourceUpsertEvent) ([]byte, string, error) {
 	input = input.Normalize()
 	if err := input.Validate(); err != nil {
 		return nil, "", err

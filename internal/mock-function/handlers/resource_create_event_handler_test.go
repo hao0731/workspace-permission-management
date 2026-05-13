@@ -10,16 +10,16 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/mockfunction"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 )
 
 type fakeResourceCreateService struct {
 	err     error
-	command mockfunction.ResourceCreateCommand
+	command resource.ResourceCreateCommand
 }
 
-func (f *fakeResourceCreateService) HandleResourceCreate(_ context.Context, command mockfunction.ResourceCreateCommand) error {
+func (f *fakeResourceCreateService) HandleResourceCreate(_ context.Context, command resource.ResourceCreateCommand) error {
 	f.command = command
 	return f.err
 }
@@ -67,7 +67,7 @@ func TestResourceCreateEventHandlerRetriesPublisherFailure(t *testing.T) {
 }
 
 func TestResourceCreateEventHandlerTerminatesInvalidServiceInput(t *testing.T) {
-	service := &fakeResourceCreateService{err: mockfunction.ErrInvalidInput}
+	service := &fakeResourceCreateService{err: resource.ErrInvalidInput}
 	handler := NewResourceCreateEventHandler(service, map[string]string{"cmd.app.documents.resource.create": "documents"}, slog.Default())
 	result := handler.Handle(context.Background(), eventbus.Message{Subject: "cmd.app.documents.resource.create", Data: validCreateEventData(t)})
 	if result != eventbus.HandleResultTerminate {

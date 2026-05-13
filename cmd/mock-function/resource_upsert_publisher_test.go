@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/mockfunction"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 )
 
@@ -25,7 +25,7 @@ func (f *fakeMessagePublisher) Publish(_ context.Context, subject string, data [
 func TestResourceUpsertPublisherPublishesDerivedSubject(t *testing.T) {
 	publisher := &fakeMessagePublisher{}
 	upsertPublisher := newResourceUpsertPublisher(publisher, eventbus.WithPublishTimeout(time.Second))
-	err := upsertPublisher.PublishResourceUpsert(context.Background(), mockfunction.ResourceUpsertEvent{
+	err := upsertPublisher.PublishResourceUpsert(context.Background(), resource.ResourceUpsertEvent{
 		ResourceID:   "resource-1",
 		DisplayName:  "Docs",
 		ResourceType: "document",

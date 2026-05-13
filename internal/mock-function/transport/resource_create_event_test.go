@@ -37,6 +37,13 @@ func TestParseResourceCreateCommandEvent(t *testing.T) {
 	if command.AppName != "documents" || command.WorkspaceID != "workspace-1" {
 		t.Fatalf("command = %+v", command)
 	}
+	if command.EventID != "event-1" {
+		t.Fatalf("EventID = %q, want event-1", command.EventID)
+	}
+	wantTime := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	if !command.EventTime.Equal(wantTime) {
+		t.Fatalf("EventTime = %s, want %s", command.EventTime, wantTime)
+	}
 }
 
 func TestParseResourceCreateCommandEventRejectsUnknownSubject(t *testing.T) {

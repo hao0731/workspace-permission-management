@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/mockfunction"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/mock-function/transport"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 )
@@ -25,7 +25,7 @@ func newResourceUpsertPublisher(publisher messagePublisher, opts ...eventbus.Pub
 	}
 }
 
-func (p resourceUpsertPublisher) PublishResourceUpsert(ctx context.Context, event mockfunction.ResourceUpsertEvent) error {
+func (p resourceUpsertPublisher) PublishResourceUpsert(ctx context.Context, event resource.ResourceUpsertEvent) error {
 	data, subject, err := transport.NewResourceUpsertEvent(event)
 	if err != nil {
 		return fmt.Errorf("build resource upsert event: %w", err)
