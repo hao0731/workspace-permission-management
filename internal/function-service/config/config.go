@@ -32,7 +32,6 @@ type NATSConfig struct {
 type JetStreamConfig struct {
 	Stream     string
 	Durable    string
-	Subject    string
 	FetchCount int
 	MaxWait    time.Duration
 }
@@ -63,7 +62,6 @@ func Load() (Config, error) {
 		JetStream: JetStreamConfig{
 			Stream:     v.GetString("FUNCTION_SERVICE_JETSTREAM_STREAM"),
 			Durable:    v.GetString("FUNCTION_SERVICE_JETSTREAM_DURABLE"),
-			Subject:    v.GetString("FUNCTION_SERVICE_JETSTREAM_SUBJECT"),
 			FetchCount: v.GetInt("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT"),
 			MaxWait:    v.GetDuration("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT"),
 		},
@@ -89,7 +87,6 @@ func (c Config) Validate() error {
 		"FUNCTION_SERVICE_NATS_URL":                 c.NATS.URL,
 		"FUNCTION_SERVICE_JETSTREAM_STREAM":         c.JetStream.Stream,
 		"FUNCTION_SERVICE_JETSTREAM_DURABLE":        c.JetStream.Durable,
-		"FUNCTION_SERVICE_JETSTREAM_SUBJECT":        c.JetStream.Subject,
 		"FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT": c.ResourceDeletedSubject,
 	}
 	for key, value := range required {

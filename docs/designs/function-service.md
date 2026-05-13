@@ -45,7 +45,8 @@ Policy alignment:
 - Keep the resource-deleted event subject configurable.
 - Treat delete requests for missing documents as idempotent success: return `204`, publish no event, and write a structured log entry.
 - Support cursor-based pagination with `limit` and `next_token`.
-- Keep JetStream stream, upsert subject, durable consumer name, fetch count, and wait settings configurable.
+- Keep JetStream stream, durable consumer name, fetch count, and wait settings configurable.
+- Subscribe to the fixed resource-upsert subject pattern `app.*.resource.upserted`.
 - Enable health endpoints from `internal/shared/health` in `cmd/function-service/main.go`.
 
 ## Non-Goals
@@ -117,10 +118,10 @@ Rationale:
 NATS subject and CloudEvent type:
 
 ```txt
-app.todo.resource.upserted
+app.<FUNCTION_KEY>.resource.upserted
 ```
 
-The subject remains configurable, but the default deployment contract is `app.todo.resource.upserted`.
+`function-service` subscribes to the fixed JetStream filter `app.*.resource.upserted`. This subject is not function-service runtime config; the wildcard token represents one concrete function key, such as `app.documents.resource.upserted`.
 
 Implementation should parse the CloudEvent envelope with the CloudEvents Go SDK identified by the backend policy instead of hand-rolling envelope parsing. This is an intentional dependency because CloudEvents are part of the repository's backend technology stack and are the public event contract for brokered events.
 
@@ -177,7 +178,8 @@ Required data fields:
 Validation rules:
 
 - `specversion` must be `1.0`.
-- `type` must match the configured subject, whose default is `app.todo.resource.upserted`.
+- `type` must be a concrete subject matching `app.*.resource.upserted`.
+- `type` must match `app.<data.function_key>.resource.upserted`.
 - `datacontenttype` must be `application/json`.
 - `time` must be a valid timestamp.
 - `data.resource_id`, `workspace_id`, `function_key`, `display_name`, and `resource_type` must be non-empty strings.
@@ -350,7 +352,7 @@ Services should call the domain `Validate` methods before invoking repositories 
 
 Configuration must come from environment variables, with `.env` support allowed for local development.
 
-JetStream stream and durable consumer provisioning is outside the first version of `function-service`. The service binds to the configured stream and durable consumer through `internal/shared/eventbus` during startup and fails fast when they do not exist or when the consumer filter does not include the configured subject.
+JetStream stream and durable consumer provisioning is outside the first version of `function-service`. The service binds to the configured stream and durable consumer through `internal/shared/eventbus` during startup and fails fast when they do not exist or when the consumer filter does not include `app.*.resource.upserted`.
 
 Required settings:
 
@@ -360,7 +362,6 @@ Required settings:
 - `FUNCTION_SERVICE_NATS_URL`
 - `FUNCTION_SERVICE_JETSTREAM_STREAM`
 - `FUNCTION_SERVICE_JETSTREAM_DURABLE`
-- `FUNCTION_SERVICE_JETSTREAM_SUBJECT`
 
 Optional settings:
 
@@ -382,7 +383,7 @@ Repository environment files:
 
 Deployment defaults:
 
-- `FUNCTION_SERVICE_JETSTREAM_SUBJECT=app.todo.resource.upserted`
+- Resource-upsert consumer filter: `app.*.resource.upserted`
 - `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT=app.todo.resource.deleted`
 
 Config validation:
@@ -406,7 +407,7 @@ Startup responsibilities:
 4. Initialize MongoDB indexes for `function_resources`.
 5. Connect to NATS.
 6. Create an `internal/shared/eventbus` JetStream producer for resource-deleted events.
-7. Create an `internal/shared/eventbus` JetStream consumer using configured stream, durable, subject, fetch count, and wait duration.
+7. Create an `internal/shared/eventbus` JetStream consumer using configured stream, durable, fetch count, wait duration, and the fixed `app.*.resource.upserted` filter.
 8. Create Echo and register:
    - `/health/liveness` from `internal/shared/health`.
    - resource API routes.
@@ -704,7 +705,7 @@ Additional verification may include `go vet ./...` if the implementation plan to
    - Trade-off: Clients cannot distinguish "workspace/function missing" from "no resources projected" through this endpoint.
 
 6. Bind to pre-provisioned JetStream stream and durable consumer.
-   - Rationale: The existing `internal/shared/eventbus` consumer binds and validates configured stream, durable, and subject contracts at startup.
+   - Rationale: The existing `internal/shared/eventbus` consumer binds and validates the configured stream, durable, and fixed resource-upsert subject contract at startup.
    - Trade-off: Local and deployment environments must provision JetStream resources before starting `function-service`.
 
 7. Return `204` for missing delete targets and publish no event.

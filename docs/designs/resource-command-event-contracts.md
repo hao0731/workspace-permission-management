@@ -90,6 +90,8 @@ cmd.app.<APP_NAME>.resource.create
 app.<FUNCTION_KEY>.resource.upserted
 ```
 
+`function-service` subscribes to the fixed wildcard filter `app.*.resource.upserted`. Its transport parser accepts concrete CloudEvent `type` values that match that pattern and the event's `function_key`; the wildcard pattern itself is not a valid published event type.
+
 Both types should provide `Normalize()` and `Validate()` methods. Validation errors should wrap `resource.ErrInvalidInput`, allowing event handlers to classify invalid command or event data without importing service-specific domain packages.
 
 `ResourceUpsertEvent` replaces `UpsertInput` for the resource upsert use case. Function-service handlers, services, and repositories should pass this type directly through the upsert workflow after transport parsing. Repository implementations can map the event fields to persistence fields at the repository boundary:
@@ -141,7 +143,7 @@ This keeps the shared command contract in `internal/domain/resource` while prese
 
 `function-service`:
 
-1. Consumes `app.<FUNCTION_KEY>.resource.upserted`.
+1. Consumes the fixed `app.*.resource.upserted` subject pattern.
 2. Calls `internal/function-service/transport.ParseResourceUpsertEvent(...)`.
 3. The transport parser validates the CloudEvent envelope and returns `resource.ResourceUpsertEvent`.
 4. The handler invokes the resource upsert workflow with `resource.ResourceUpsertEvent` directly.

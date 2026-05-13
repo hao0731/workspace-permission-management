@@ -15,7 +15,6 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://example:4222")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_SUBJECT", "app.todo.resource.upserted")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT", "25")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT", "7s")
 	t.Setenv("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT", "app.todo.resource.deleted")
@@ -46,9 +45,6 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	if cfg.JetStream.Durable != "function-service" {
 		t.Fatalf("JetStream.Durable = %q, want function-service", cfg.JetStream.Durable)
 	}
-	if cfg.JetStream.Subject != "app.todo.resource.upserted" {
-		t.Fatalf("JetStream.Subject = %q, want app.todo.resource.upserted", cfg.JetStream.Subject)
-	}
 	if cfg.JetStream.FetchCount != 25 {
 		t.Fatalf("JetStream.FetchCount = %d, want 25", cfg.JetStream.FetchCount)
 	}
@@ -70,7 +66,6 @@ func TestLoadAppliesOptionalDefaults(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_SUBJECT", "app.todo.resource.upserted")
 
 	cfg, err := Load()
 	if err != nil {
@@ -101,7 +96,6 @@ func TestLoadRejectsInvalidEnvironment(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_SUBJECT", "app.todo.resource.upserted")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load error = nil, want error")
@@ -114,7 +108,6 @@ func TestLoadRejectsMissingRequiredValue(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_SUBJECT", "app.todo.resource.upserted")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load error = nil, want error")
@@ -128,7 +121,6 @@ func TestLoadRejectsBlankResourceDeletedSubject(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_SUBJECT", "app.todo.resource.upserted")
 	t.Setenv("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT", " ")
 
 	if _, err := Load(); err == nil {

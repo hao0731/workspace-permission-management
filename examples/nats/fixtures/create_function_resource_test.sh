@@ -68,7 +68,8 @@ run_script() {
 
 assert_docker_args() {
   local args_file="$1"
-  local expected_args="run --rm -i --network workspace_permission_management natsio/nats-box:0.19.3 nats --server nats://workspace-permission-management-nats:4222 pub --jetstream --force-stdin app.todo.resource.upserted"
+  local expected_subject="$2"
+  local expected_args="run --rm -i --network workspace_permission_management natsio/nats-box:0.19.3 nats --server nats://workspace-permission-management-nats:4222 pub --jetstream --force-stdin ${expected_subject}"
   local actual_args
 
   actual_args="$(cat "${args_file}")"
@@ -80,11 +81,11 @@ assert_docker_args() {
 
 run_script custom workspace-9 billing
 
-assert_docker_args "${TMP_DIR}/custom.args"
+assert_docker_args "${TMP_DIR}/custom.args" "app.billing.resource.upserted"
 
 jq -e '
   .specversion == "1.0" and
-  .type == "app.todo.resource.upserted" and
+  .type == "app.billing.resource.upserted" and
   .source == "function-resource-fixture" and
   .subject == "11111111-1111-4111-8111-111111111111" and
   .id == "22222222-2222-4222-8222-222222222222" and
@@ -106,8 +107,8 @@ fi
 run_script default_first
 run_script default_second
 
-assert_docker_args "${TMP_DIR}/default_first.args"
-assert_docker_args "${TMP_DIR}/default_second.args"
+assert_docker_args "${TMP_DIR}/default_first.args" "app.todo.resource.upserted"
+assert_docker_args "${TMP_DIR}/default_second.args" "app.todo.resource.upserted"
 
 uuid_pattern='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
 

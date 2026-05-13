@@ -10,7 +10,11 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 )
 
-const cloudEventSpecVersion = "1.0"
+const (
+	cloudEventSpecVersion = "1.0"
+
+	ResourceUpsertEventTypePattern = "app.*.resource.upserted"
+)
 
 type resourceUpsertData struct {
 	ResourceID   string   `json:"resource_id"`
@@ -21,7 +25,7 @@ type resourceUpsertData struct {
 	WorkspaceID  string   `json:"workspace_id"`
 }
 
-func ParseResourceUpsertEvent(data []byte, expectedType string) (resource.ResourceUpsertEvent, error) {
+func ParseResourceUpsertEvent(data []byte) (resource.ResourceUpsertEvent, error) {
 	var event cloudevents.Event
 	if err := json.Unmarshal(data, &event); err != nil {
 		return resource.ResourceUpsertEvent{}, fmt.Errorf("parse cloudevent: %w", err)
@@ -32,8 +36,8 @@ func ParseResourceUpsertEvent(data []byte, expectedType string) (resource.Resour
 	if event.SpecVersion() != cloudEventSpecVersion {
 		return resource.ResourceUpsertEvent{}, fmt.Errorf("unsupported cloudevent specversion %q", event.SpecVersion())
 	}
-	if event.Type() != expectedType {
-		return resource.ResourceUpsertEvent{}, fmt.Errorf("cloudevent type %q does not match expected %q", event.Type(), expectedType)
+	if !matchesResourceUpsertEventTypePattern(event.Type()) {
+		return resource.ResourceUpsertEvent{}, fmt.Errorf("cloudevent type %q does not match subject pattern %q", event.Type(), ResourceUpsertEventTypePattern)
 	}
 	if event.DataContentType() != "application/json" {
 		return resource.ResourceUpsertEvent{}, fmt.Errorf("cloudevent datacontenttype must be application/json")
@@ -51,6 +55,10 @@ func ParseResourceUpsertEvent(data []byte, expectedType string) (resource.Resour
 		strings.TrimSpace(payload.DisplayName) == "" ||
 		strings.TrimSpace(payload.ResourceType) == "" {
 		return resource.ResourceUpsertEvent{}, fmt.Errorf("resource event data contains empty required field")
+	}
+	expectedType := resource.ResourceUpsertEvent{FunctionKey: strings.TrimSpace(payload.FunctionKey)}.Subject()
+	if event.Type() != expectedType {
+		return resource.ResourceUpsertEvent{}, fmt.Errorf("cloudevent type %q does not match data.function_key subject %q", event.Type(), expectedType)
 	}
 	for _, tag := range payload.ResourceTags {
 		if strings.TrimSpace(tag) == "" {
@@ -70,4 +78,19 @@ func ParseResourceUpsertEvent(data []byte, expectedType string) (resource.Resour
 		EventID:      event.ID(),
 		EventTime:    event.Time(),
 	}, nil
+}
+
+func matchesResourceUpsertEventTypePattern(eventType string) bool {
+	parts := strings.Split(eventType, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	return parts[0] == "app" &&
+		isConcreteSubjectToken(parts[1]) &&
+		parts[2] == "resource" &&
+		parts[3] == "upserted"
+}
+
+func isConcreteSubjectToken(token string) bool {
+	return token != "" && strings.TrimSpace(token) == token && token != "*" && token != ">"
 }

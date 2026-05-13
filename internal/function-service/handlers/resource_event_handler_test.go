@@ -24,7 +24,7 @@ func (f *fakeEventResourceService) UpsertResource(ctx context.Context, event res
 
 func TestResourceEventHandlerAck(t *testing.T) {
 	service := &fakeEventResourceService{}
-	handler := NewResourceEventHandler(service, "app.todo.resource.upserted", nil)
+	handler := NewResourceEventHandler(service, nil)
 
 	result := handler.Handle(context.Background(), eventbus.Message{
 		Subject: "app.todo.resource.upserted",
@@ -56,7 +56,7 @@ func TestResourceEventHandlerAck(t *testing.T) {
 }
 
 func TestResourceEventHandlerTerminatesPoisonMessage(t *testing.T) {
-	handler := NewResourceEventHandler(&fakeEventResourceService{}, "app.todo.resource.upserted", nil)
+	handler := NewResourceEventHandler(&fakeEventResourceService{}, nil)
 
 	result := handler.Handle(context.Background(), eventbus.Message{
 		Subject: "app.todo.resource.upserted",
@@ -70,7 +70,7 @@ func TestResourceEventHandlerTerminatesPoisonMessage(t *testing.T) {
 
 func TestResourceEventHandlerRetriesTransientServiceError(t *testing.T) {
 	service := &fakeEventResourceService{err: ErrRetryableEvent}
-	handler := NewResourceEventHandler(service, "app.todo.resource.upserted", nil)
+	handler := NewResourceEventHandler(service, nil)
 
 	result := handler.Handle(context.Background(), eventbus.Message{
 		Subject: "app.todo.resource.upserted",
@@ -100,7 +100,7 @@ func TestResourceEventHandlerRetriesTransientServiceError(t *testing.T) {
 
 func TestResourceEventHandlerTerminatesInvalidServiceInput(t *testing.T) {
 	service := &fakeEventResourceService{err: resource.ErrInvalidInput}
-	handler := NewResourceEventHandler(service, "app.todo.resource.upserted", nil)
+	handler := NewResourceEventHandler(service, nil)
 
 	result := handler.Handle(context.Background(), eventbus.Message{
 		Subject: "app.todo.resource.upserted",

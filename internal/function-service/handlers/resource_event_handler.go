@@ -17,20 +17,19 @@ type EventResourceService interface {
 }
 
 type ResourceEventHandler struct {
-	service      EventResourceService
-	expectedType string
-	logger       *slog.Logger
+	service EventResourceService
+	logger  *slog.Logger
 }
 
-func NewResourceEventHandler(service EventResourceService, expectedType string, logger *slog.Logger) *ResourceEventHandler {
+func NewResourceEventHandler(service EventResourceService, logger *slog.Logger) *ResourceEventHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ResourceEventHandler{service: service, expectedType: expectedType, logger: logger}
+	return &ResourceEventHandler{service: service, logger: logger}
 }
 
 func (h *ResourceEventHandler) Handle(ctx context.Context, msg eventbus.Message) eventbus.HandleResult {
-	event, err := transport.ParseResourceUpsertEvent(msg.Data, h.expectedType)
+	event, err := transport.ParseResourceUpsertEvent(msg.Data)
 	if err != nil {
 		h.logger.Warn("terminating invalid resource event", "err", err, "subject", msg.Subject)
 		return eventbus.HandleResultTerminate
