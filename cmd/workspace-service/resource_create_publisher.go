@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/workspace"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 	"github.com/hao0731/workspace-permission-management/internal/workspace-service/transport"
 )
@@ -25,7 +25,7 @@ func newResourceCreatePublisher(publisher messagePublisher, opts ...eventbus.Pub
 	}
 }
 
-func (p resourceCreatePublisher) PublishResourceCreateCommand(ctx context.Context, command workspace.ResourceCreateCommand) error {
+func (p resourceCreatePublisher) PublishResourceCreateCommand(ctx context.Context, command resource.ResourceCreateCommand) error {
 	data, err := transport.NewResourceCreateEvent(command)
 	if err != nil {
 		return fmt.Errorf("build resource create event: %w", err)

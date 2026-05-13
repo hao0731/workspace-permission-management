@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/workspace"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 )
 
@@ -25,9 +25,8 @@ func (f *fakeMessagePublisher) Publish(_ context.Context, subject string, data [
 func TestResourceCreatePublisherPublishesExpectedSubject(t *testing.T) {
 	publisher := &fakeMessagePublisher{}
 	resourcePublisher := newResourceCreatePublisher(publisher, eventbus.WithPublishTimeout(time.Second))
-	err := resourcePublisher.PublishResourceCreateCommand(context.Background(), workspace.ResourceCreateCommand{
+	err := resourcePublisher.PublishResourceCreateCommand(context.Background(), resource.ResourceCreateCommand{
 		WorkspaceID:  "workspace-1",
-		Section:      workspace.ResourceSectionDocuments,
 		AppName:      "documents",
 		ResourceName: "Docs",
 		ResourceType: "document",

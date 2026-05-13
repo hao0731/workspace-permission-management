@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	domainhr "github.com/hao0731/workspace-permission-management/internal/domain/hr"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/domain/workspace"
 	clienthr "github.com/hao0731/workspace-permission-management/internal/shared/interactions/hr"
 )
@@ -21,7 +22,12 @@ type WorkspaceRepository interface {
 }
 
 type ResourceCreateCommandPublisher interface {
-	PublishResourceCreateCommand(ctx context.Context, command workspace.ResourceCreateCommand) error
+	PublishResourceCreateCommand(ctx context.Context, command resource.ResourceCreateCommand) error
+}
+
+type sectionResourceCreateCommand struct {
+	section workspace.ResourceSection
+	command resource.ResourceCreateCommand
 }
 
 type CreateWorkspaceResult struct {
@@ -132,12 +138,13 @@ func (s *WorkspaceService) CreateWorkspace(ctx context.Context, input workspace.
 
 func (s *WorkspaceService) publishResourceCreateCommands(ctx context.Context, workspaceID string, input workspace.CreateInput) {
 	commands := s.resourceCreateCommands(workspaceID, input)
-	for _, command := range commands {
+	for _, item := range commands {
+		command := item.command
 		if s.publisher == nil {
 			s.logger.Error("failed to publish resource create command",
 				"err", "publisher is not configured",
 				"workspace_id", command.WorkspaceID,
-				"resource_section", command.Section,
+				"resource_section", item.section,
 				"app_name", command.AppName,
 				"resource_type", command.ResourceType,
 				"resource_name", command.ResourceName,
@@ -150,7 +157,7 @@ func (s *WorkspaceService) publishResourceCreateCommands(ctx context.Context, wo
 			s.logger.Error("failed to publish resource create command",
 				"err", err,
 				"workspace_id", command.WorkspaceID,
-				"resource_section", command.Section,
+				"resource_section", item.section,
 				"app_name", command.AppName,
 				"resource_type", command.ResourceType,
 				"resource_name", command.ResourceName,
@@ -161,8 +168,8 @@ func (s *WorkspaceService) publishResourceCreateCommands(ctx context.Context, wo
 	}
 }
 
-func (s *WorkspaceService) resourceCreateCommands(workspaceID string, input workspace.CreateInput) []workspace.ResourceCreateCommand {
-	commands := make([]workspace.ResourceCreateCommand, 0, 3)
+func (s *WorkspaceService) resourceCreateCommands(workspaceID string, input workspace.CreateInput) []sectionResourceCreateCommand {
+	commands := make([]sectionResourceCreateCommand, 0, 3)
 	if input.Documents != nil {
 		commands = append(commands, s.newCommand(workspaceID, workspace.ResourceSectionDocuments, *input.Documents, s.mappings.Documents))
 	}
@@ -175,14 +182,16 @@ func (s *WorkspaceService) resourceCreateCommands(workspaceID string, input work
 	return commands
 }
 
-func (s *WorkspaceService) newCommand(workspaceID string, section workspace.ResourceSection, request workspace.ResourceRequest, mapping ResourceMapping) workspace.ResourceCreateCommand {
-	return workspace.ResourceCreateCommand{
-		WorkspaceID:  workspaceID,
-		Section:      section,
-		AppName:      mapping.AppName,
-		ResourceName: request.Normalize().ResourceName,
-		ResourceType: mapping.ResourceType,
-		EventID:      s.idGenerator(),
-		EventTime:    s.clock(),
-	}.Normalize()
+func (s *WorkspaceService) newCommand(workspaceID string, section workspace.ResourceSection, request workspace.ResourceRequest, mapping ResourceMapping) sectionResourceCreateCommand {
+	return sectionResourceCreateCommand{
+		section: section,
+		command: resource.ResourceCreateCommand{
+			WorkspaceID:  workspaceID,
+			AppName:      mapping.AppName,
+			ResourceName: request.Normalize().ResourceName,
+			ResourceType: mapping.ResourceType,
+			EventID:      s.idGenerator(),
+			EventTime:    s.clock(),
+		}.Normalize(),
+	}
 }

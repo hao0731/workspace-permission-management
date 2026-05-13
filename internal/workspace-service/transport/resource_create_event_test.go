@@ -7,12 +7,12 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/workspace"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 )
 
 func TestNewResourceCreateEvent(t *testing.T) {
 	eventTime := time.Date(2026, 5, 5, 7, 31, 0, 0, time.UTC)
-	data, err := NewResourceCreateEvent(workspace.ResourceCreateCommand{
+	data, err := NewResourceCreateEvent(resource.ResourceCreateCommand{
 		WorkspaceID:  "workspace-1",
 		AppName:      "documents",
 		ResourceName: "Docs",
@@ -43,7 +43,7 @@ func TestNewResourceCreateEvent(t *testing.T) {
 }
 
 func TestNewResourceCreateEventRejectsInvalidCommand(t *testing.T) {
-	_, err := NewResourceCreateEvent(workspace.ResourceCreateCommand{})
+	_, err := NewResourceCreateEvent(resource.ResourceCreateCommand{})
 	if err == nil {
 		t.Fatal("NewResourceCreateEvent() error = nil, want error")
 	}

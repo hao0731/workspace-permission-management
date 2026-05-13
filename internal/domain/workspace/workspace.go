@@ -31,17 +31,3 @@ type CreateInput struct {
 	Tasks          *ResourceRequest
 	Drive          *ResourceRequest
 }
-
-type ResourceCreateCommand struct {
-	WorkspaceID  string
-	Section      ResourceSection
-	AppName      string
-	ResourceName string
-	ResourceType string
-	EventID      string
-	EventTime    time.Time
-}
-
-func (c ResourceCreateCommand) Subject() string {
-	return "cmd.app." + c.AppName + ".resource.create"
-}

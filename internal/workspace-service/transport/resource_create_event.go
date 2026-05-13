@@ -6,7 +6,7 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
-	"github.com/hao0731/workspace-permission-management/internal/domain/workspace"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 )
 
 type resourceCreateData struct {
@@ -15,7 +15,7 @@ type resourceCreateData struct {
 	ResourceType string `json:"resource_type"`
 }
 
-func NewResourceCreateEvent(command workspace.ResourceCreateCommand) ([]byte, error) {
+func NewResourceCreateEvent(command resource.ResourceCreateCommand) ([]byte, error) {
 	command = command.Normalize()
 	if err := command.Validate(); err != nil {
 		return nil, err

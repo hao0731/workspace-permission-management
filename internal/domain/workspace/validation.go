@@ -97,38 +97,6 @@ func (input CreateInput) Validate() error {
 	return nil
 }
 
-func (c ResourceCreateCommand) Normalize() ResourceCreateCommand {
-	c.WorkspaceID = strings.TrimSpace(c.WorkspaceID)
-	c.AppName = strings.TrimSpace(c.AppName)
-	c.ResourceName = strings.TrimSpace(c.ResourceName)
-	c.ResourceType = strings.TrimSpace(c.ResourceType)
-	c.EventID = strings.TrimSpace(c.EventID)
-	return c
-}
-
-func (c ResourceCreateCommand) Validate() error {
-	normalized := c.Normalize()
-	if normalized.WorkspaceID == "" {
-		return invalidInput("workspace id is required")
-	}
-	if normalized.AppName == "" {
-		return invalidInput("app name is required")
-	}
-	if normalized.ResourceName == "" {
-		return invalidInput("resource name is required")
-	}
-	if normalized.ResourceType == "" {
-		return invalidInput("resource type is required")
-	}
-	if normalized.EventID == "" {
-		return invalidInput("event id is required")
-	}
-	if normalized.EventTime.IsZero() {
-		return invalidInput("event time is required")
-	}
-	return nil
-}
-
 func invalidInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidInput, message)
 }

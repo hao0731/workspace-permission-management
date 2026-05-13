@@ -10,6 +10,7 @@ import (
 	"time"
 
 	domainhr "github.com/hao0731/workspace-permission-management/internal/domain/hr"
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/domain/workspace"
 )
 
@@ -49,11 +50,11 @@ func (f *fakeHRClient) BatchGet(context.Context, []string) ([]domainhr.User, err
 }
 
 type fakeCommandPublisher struct {
-	commands []workspace.ResourceCreateCommand
+	commands []resource.ResourceCreateCommand
 	errs     []error
 }
 
-func (f *fakeCommandPublisher) PublishResourceCreateCommand(_ context.Context, command workspace.ResourceCreateCommand) error {
+func (f *fakeCommandPublisher) PublishResourceCreateCommand(_ context.Context, command resource.ResourceCreateCommand) error {
 	f.commands = append(f.commands, command)
 	if len(f.errs) == 0 {
 		return nil
@@ -97,7 +98,10 @@ func TestWorkspaceServiceCreateWorkspace(t *testing.T) {
 	if len(publisher.commands) != 2 {
 		t.Fatalf("commands = %+v, want 2", publisher.commands)
 	}
-	if publisher.commands[0].Section != workspace.ResourceSectionDocuments || publisher.commands[1].Section != workspace.ResourceSectionTasks {
+	if publisher.commands[0].AppName != "documents" || publisher.commands[0].ResourceType != "document" {
+		t.Fatalf("documents command = %+v", publisher.commands[0])
+	}
+	if publisher.commands[1].AppName != "tasks" || publisher.commands[1].ResourceType != "task" {
 		t.Fatalf("commands order = %+v", publisher.commands)
 	}
 }
