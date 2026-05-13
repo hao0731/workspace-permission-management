@@ -7,18 +7,6 @@ import (
 	"time"
 )
 
-func validUpsertInput() UpsertInput {
-	return UpsertInput{
-		ID:          "resource-1",
-		WorkspaceID: "workspace-1",
-		FunctionKey: "todo",
-		DisplayName: "Spec",
-		Type:        "document",
-		Tags:        []string{"section_1"},
-		EventTime:   time.Date(2026, 5, 5, 7, 31, 0, 0, time.UTC),
-	}
-}
-
 func validDeleteInput() DeleteInput {
 	return DeleteInput{
 		WorkspaceID: "workspace-1",
@@ -35,6 +23,30 @@ func validListQuery() ListQuery {
 	}
 }
 
+func validResourceUpsertEvent() ResourceUpsertEvent {
+	return ResourceUpsertEvent{
+		ResourceID:   "resource-1",
+		WorkspaceID:  "workspace-1",
+		FunctionKey:  "todo",
+		DisplayName:  "Spec",
+		ResourceType: "document",
+		ResourceTags: []string{"section_1"},
+		EventID:      "event-1",
+		EventTime:    time.Date(2026, 5, 5, 7, 31, 0, 0, time.UTC),
+	}
+}
+
+func validResourceCreateCommand() ResourceCreateCommand {
+	return ResourceCreateCommand{
+		WorkspaceID:  "workspace-1",
+		AppName:      "documents",
+		ResourceName: "Docs",
+		ResourceType: "document",
+		EventID:      "event-1",
+		EventTime:    time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC),
+	}
+}
+
 func requireInvalidInput(t *testing.T, err error, wantMessage string) {
 	t.Helper()
 
@@ -46,66 +58,153 @@ func requireInvalidInput(t *testing.T, err error, wantMessage string) {
 	}
 }
 
-func TestUpsertInputValidateAcceptsValidInput(t *testing.T) {
-	input := validUpsertInput()
-
-	if err := input.Validate(); err != nil {
+func TestResourceCreateCommandValidateAcceptsValidCommand(t *testing.T) {
+	if err := validResourceCreateCommand().Validate(); err != nil {
 		t.Fatalf("Validate error = %v, want nil", err)
 	}
 }
 
-func TestUpsertInputValidateRejectsInvalidFields(t *testing.T) {
+func TestResourceCreateCommandValidateRejectsInvalidFields(t *testing.T) {
 	tests := []struct {
 		name        string
-		mutate      func(*UpsertInput)
+		mutate      func(*ResourceCreateCommand)
+		wantMessage string
+	}{
+		{
+			name: "blank workspace id",
+			mutate: func(c *ResourceCreateCommand) {
+				c.WorkspaceID = "   "
+			},
+			wantMessage: "workspace id is required",
+		},
+		{
+			name: "blank app name",
+			mutate: func(c *ResourceCreateCommand) {
+				c.AppName = "   "
+			},
+			wantMessage: "app name is required",
+		},
+		{
+			name: "blank resource name",
+			mutate: func(c *ResourceCreateCommand) {
+				c.ResourceName = "   "
+			},
+			wantMessage: "resource name is required",
+		},
+		{
+			name: "blank resource type",
+			mutate: func(c *ResourceCreateCommand) {
+				c.ResourceType = "   "
+			},
+			wantMessage: "resource type is required",
+		},
+		{
+			name: "blank event id",
+			mutate: func(c *ResourceCreateCommand) {
+				c.EventID = "   "
+			},
+			wantMessage: "event id is required",
+		},
+		{
+			name: "zero event time",
+			mutate: func(c *ResourceCreateCommand) {
+				c.EventTime = time.Time{}
+			},
+			wantMessage: "event time is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command := validResourceCreateCommand()
+			tt.mutate(&command)
+			requireInvalidInput(t, command.Validate(), tt.wantMessage)
+		})
+	}
+}
+
+func TestResourceCreateCommandNormalizeAndSubject(t *testing.T) {
+	command := ResourceCreateCommand{
+		WorkspaceID:  " workspace-1 ",
+		AppName:      " documents ",
+		ResourceName: " Docs ",
+		ResourceType: " document ",
+		EventID:      " event-1 ",
+	}
+	normalized := command.Normalize()
+	if normalized.WorkspaceID != "workspace-1" || normalized.AppName != "documents" || normalized.ResourceName != "Docs" || normalized.ResourceType != "document" || normalized.EventID != "event-1" {
+		t.Fatalf("Normalize() = %+v", normalized)
+	}
+	if normalized.Subject() != "cmd.app.documents.resource.create" {
+		t.Fatalf("Subject() = %q", normalized.Subject())
+	}
+}
+
+func TestResourceUpsertEventValidateAcceptsValidEvent(t *testing.T) {
+	if err := validResourceUpsertEvent().Validate(); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+}
+
+func TestResourceUpsertEventValidateRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*ResourceUpsertEvent)
 		wantMessage string
 	}{
 		{
 			name: "blank resource id",
-			mutate: func(input *UpsertInput) {
-				input.ID = "   "
+			mutate: func(e *ResourceUpsertEvent) {
+				e.ResourceID = "   "
 			},
 			wantMessage: "resource id is required",
 		},
 		{
 			name: "blank workspace id",
-			mutate: func(input *UpsertInput) {
-				input.WorkspaceID = "   "
+			mutate: func(e *ResourceUpsertEvent) {
+				e.WorkspaceID = "   "
 			},
 			wantMessage: "workspace id is required",
 		},
 		{
 			name: "blank function key",
-			mutate: func(input *UpsertInput) {
-				input.FunctionKey = "   "
+			mutate: func(e *ResourceUpsertEvent) {
+				e.FunctionKey = "   "
 			},
 			wantMessage: "function key is required",
 		},
 		{
 			name: "blank display name",
-			mutate: func(input *UpsertInput) {
-				input.DisplayName = "   "
+			mutate: func(e *ResourceUpsertEvent) {
+				e.DisplayName = "   "
 			},
 			wantMessage: "display name is required",
 		},
 		{
 			name: "blank resource type",
-			mutate: func(input *UpsertInput) {
-				input.Type = "   "
+			mutate: func(e *ResourceUpsertEvent) {
+				e.ResourceType = "   "
 			},
 			wantMessage: "resource type is required",
 		},
 		{
+			name: "blank event id",
+			mutate: func(e *ResourceUpsertEvent) {
+				e.EventID = "   "
+			},
+			wantMessage: "event id is required",
+		},
+		{
 			name: "zero event time",
-			mutate: func(input *UpsertInput) {
-				input.EventTime = time.Time{}
+			mutate: func(e *ResourceUpsertEvent) {
+				e.EventTime = time.Time{}
 			},
 			wantMessage: "event time is required",
 		},
 		{
 			name: "blank resource tag",
-			mutate: func(input *UpsertInput) {
-				input.Tags = []string{"section_1", "   "}
+			mutate: func(e *ResourceUpsertEvent) {
+				e.ResourceTags = []string{"section_1", "   "}
 			},
 			wantMessage: "resource tags must be non-empty strings",
 		},
@@ -113,13 +212,29 @@ func TestUpsertInputValidateRejectsInvalidFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			input := validUpsertInput()
-			tt.mutate(&input)
+			event := validResourceUpsertEvent()
+			tt.mutate(&event)
 
-			err := input.Validate()
-
-			requireInvalidInput(t, err, tt.wantMessage)
+			requireInvalidInput(t, event.Validate(), tt.wantMessage)
 		})
+	}
+}
+
+func TestResourceUpsertEventNormalizeAndSubject(t *testing.T) {
+	event := ResourceUpsertEvent{
+		ResourceID:   " resource-1 ",
+		DisplayName:  " Spec ",
+		ResourceType: " document ",
+		FunctionKey:  " todo ",
+		WorkspaceID:  " workspace-1 ",
+		EventID:      " event-1 ",
+	}
+	normalized := event.Normalize()
+	if normalized.ResourceID != "resource-1" || normalized.DisplayName != "Spec" || normalized.ResourceType != "document" || normalized.FunctionKey != "todo" || normalized.WorkspaceID != "workspace-1" || normalized.EventID != "event-1" {
+		t.Fatalf("Normalize() = %+v", normalized)
+	}
+	if normalized.Subject() != "app.todo.resource.upserted" {
+		t.Fatalf("Subject() = %q", normalized.Subject())
 	}
 }
 

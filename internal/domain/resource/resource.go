@@ -13,14 +13,32 @@ type Resource struct {
 	UpdatedAt   time.Time
 }
 
-type UpsertInput struct {
-	ID          string
-	WorkspaceID string
-	FunctionKey string
-	DisplayName string
-	Type        string
-	Tags        []string
-	EventTime   time.Time
+type ResourceCreateCommand struct {
+	WorkspaceID  string
+	AppName      string
+	ResourceName string
+	ResourceType string
+	EventID      string
+	EventTime    time.Time
+}
+
+func (c ResourceCreateCommand) Subject() string {
+	return "cmd.app." + c.AppName + ".resource.create"
+}
+
+type ResourceUpsertEvent struct {
+	ResourceID   string
+	DisplayName  string
+	ResourceType string
+	ResourceTags []string
+	FunctionKey  string
+	WorkspaceID  string
+	EventID      string
+	EventTime    time.Time
+}
+
+func (e ResourceUpsertEvent) Subject() string {
+	return "app." + e.FunctionKey + ".resource.upserted"
 }
 
 type Cursor struct {
