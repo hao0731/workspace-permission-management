@@ -48,21 +48,21 @@ func (r *MongoResourceRepository) EnsureIndexes(ctx context.Context) error {
 	return nil
 }
 
-func (r *MongoResourceRepository) Upsert(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error) {
+func (r *MongoResourceRepository) Upsert(ctx context.Context, event resource.ResourceUpsertEvent) (resource.UpsertStatus, error) {
 	update := bson.M{
 		"$set": bson.M{
-			"workspace_id":  input.WorkspaceID,
-			"function_key":  input.FunctionKey,
-			"display_name":  input.DisplayName,
-			"resource_type": input.Type,
-			"resource_tags": append([]string(nil), input.Tags...),
-			"updated_at":    input.EventTime,
+			"workspace_id":  event.WorkspaceID,
+			"function_key":  event.FunctionKey,
+			"display_name":  event.DisplayName,
+			"resource_type": event.ResourceType,
+			"resource_tags": append([]string(nil), event.ResourceTags...),
+			"updated_at":    event.EventTime,
 		},
 	}
 
 	result, err := r.collection.UpdateOne(ctx, bson.M{
-		"_id":        input.ID,
-		"updated_at": bson.M{"$lte": input.EventTime},
+		"_id":        event.ResourceID,
+		"updated_at": bson.M{"$lte": event.EventTime},
 	}, update)
 	if err != nil {
 		return "", fmt.Errorf("update current resource: %w", err)
@@ -72,18 +72,18 @@ func (r *MongoResourceRepository) Upsert(ctx context.Context, input resource.Ups
 	}
 
 	doc := resourceDocument{
-		ID:           input.ID,
-		WorkspaceID:  input.WorkspaceID,
-		FunctionKey:  input.FunctionKey,
-		DisplayName:  input.DisplayName,
-		ResourceType: input.Type,
-		ResourceTags: append([]string(nil), input.Tags...),
-		CreatedAt:    input.EventTime,
-		UpdatedAt:    input.EventTime,
+		ID:           event.ResourceID,
+		WorkspaceID:  event.WorkspaceID,
+		FunctionKey:  event.FunctionKey,
+		DisplayName:  event.DisplayName,
+		ResourceType: event.ResourceType,
+		ResourceTags: append([]string(nil), event.ResourceTags...),
+		CreatedAt:    event.EventTime,
+		UpdatedAt:    event.EventTime,
 	}
 	if _, err := r.collection.InsertOne(ctx, doc); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			status, retryErr := r.retryUpdateAfterDuplicate(ctx, input)
+			status, retryErr := r.retryUpdateAfterDuplicate(ctx, event)
 			if retryErr != nil {
 				return "", retryErr
 			}
@@ -94,18 +94,18 @@ func (r *MongoResourceRepository) Upsert(ctx context.Context, input resource.Ups
 	return resource.UpsertStatusInserted, nil
 }
 
-func (r *MongoResourceRepository) retryUpdateAfterDuplicate(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error) {
+func (r *MongoResourceRepository) retryUpdateAfterDuplicate(ctx context.Context, event resource.ResourceUpsertEvent) (resource.UpsertStatus, error) {
 	result, err := r.collection.UpdateOne(ctx, bson.M{
-		"_id":        input.ID,
-		"updated_at": bson.M{"$lte": input.EventTime},
+		"_id":        event.ResourceID,
+		"updated_at": bson.M{"$lte": event.EventTime},
 	}, bson.M{
 		"$set": bson.M{
-			"workspace_id":  input.WorkspaceID,
-			"function_key":  input.FunctionKey,
-			"display_name":  input.DisplayName,
-			"resource_type": input.Type,
-			"resource_tags": append([]string(nil), input.Tags...),
-			"updated_at":    input.EventTime,
+			"workspace_id":  event.WorkspaceID,
+			"function_key":  event.FunctionKey,
+			"display_name":  event.DisplayName,
+			"resource_type": event.ResourceType,
+			"resource_tags": append([]string(nil), event.ResourceTags...),
+			"updated_at":    event.EventTime,
 		},
 	})
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 var ErrRetryableEvent = errors.New("retryable event handling error")
 
 type EventResourceService interface {
-	UpsertResource(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error)
+	UpsertResource(ctx context.Context, event resource.ResourceUpsertEvent) (resource.UpsertStatus, error)
 }
 
 type ResourceEventHandler struct {
@@ -30,26 +30,26 @@ func NewResourceEventHandler(service EventResourceService, expectedType string, 
 }
 
 func (h *ResourceEventHandler) Handle(ctx context.Context, msg eventbus.Message) eventbus.HandleResult {
-	input, err := transport.ParseResourceUpsertEvent(msg.Data, h.expectedType)
+	event, err := transport.ParseResourceUpsertEvent(msg.Data, h.expectedType)
 	if err != nil {
 		h.logger.Warn("terminating invalid resource event", "err", err, "subject", msg.Subject)
 		return eventbus.HandleResultTerminate
 	}
 
-	status, err := h.service.UpsertResource(ctx, input)
+	status, err := h.service.UpsertResource(ctx, event)
 	if err != nil {
 		if errors.Is(err, ErrRetryableEvent) {
-			h.logger.Warn("retrying resource event", "err", err, "resource_id", input.ID)
+			h.logger.Warn("retrying resource event", "err", err, "resource_id", event.ResourceID)
 			return eventbus.HandleResultRetry
 		}
 		if errors.Is(err, resource.ErrInvalidInput) {
-			h.logger.Warn("terminating invalid resource event input", "err", err, "resource_id", input.ID)
+			h.logger.Warn("terminating invalid resource event input", "err", err, "resource_id", event.ResourceID)
 			return eventbus.HandleResultTerminate
 		}
-		h.logger.Warn("retrying resource event after service error", "err", err, "resource_id", input.ID)
+		h.logger.Warn("retrying resource event after service error", "err", err, "resource_id", event.ResourceID)
 		return eventbus.HandleResultRetry
 	}
 
-	h.logger.Info("handled resource event", "resource_id", input.ID, "status", status)
+	h.logger.Info("handled resource event", "resource_id", event.ResourceID, "status", status)
 	return eventbus.HandleResultAck
 }

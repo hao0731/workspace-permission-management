@@ -11,7 +11,7 @@ import (
 
 type fakeResourceRepository struct {
 	upsertStatus resource.UpsertStatus
-	upsertInput  resource.UpsertInput
+	upsertEvent  resource.ResourceUpsertEvent
 	upsertCalls  int
 	upsertErr    error
 	listQuery    resource.ListQuery
@@ -24,9 +24,9 @@ type fakeResourceRepository struct {
 	deleteErr    error
 }
 
-func (f *fakeResourceRepository) Upsert(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error) {
+func (f *fakeResourceRepository) Upsert(ctx context.Context, event resource.ResourceUpsertEvent) (resource.UpsertStatus, error) {
 	f.upsertCalls++
-	f.upsertInput = input
+	f.upsertEvent = event
 	if f.upsertErr != nil {
 		return "", f.upsertErr
 	}
@@ -68,14 +68,15 @@ func TestResourceServiceUpsertResource(t *testing.T) {
 	repo := &fakeResourceRepository{upsertStatus: resource.UpsertStatusInserted}
 	service := NewResourceService(repo)
 
-	got, err := service.UpsertResource(context.Background(), resource.UpsertInput{
-		ID:          "resource-1",
-		WorkspaceID: "workspace-1",
-		FunctionKey: "todo",
-		DisplayName: "Spec",
-		Type:        "document",
-		Tags:        []string{"section_1"},
-		EventTime:   eventTime,
+	got, err := service.UpsertResource(context.Background(), resource.ResourceUpsertEvent{
+		ResourceID:   "resource-1",
+		WorkspaceID:  "workspace-1",
+		FunctionKey:  "todo",
+		DisplayName:  "Spec",
+		ResourceType: "document",
+		ResourceTags: []string{"section_1"},
+		EventID:      "event-1",
+		EventTime:    eventTime,
 	})
 	if err != nil {
 		t.Fatalf("UpsertResource error = %v, want nil", err)
@@ -83,26 +84,27 @@ func TestResourceServiceUpsertResource(t *testing.T) {
 	if got != resource.UpsertStatusInserted {
 		t.Fatalf("status = %q, want %q", got, resource.UpsertStatusInserted)
 	}
-	if repo.upsertInput.ID != "resource-1" {
-		t.Fatalf("repo input ID = %q, want resource-1", repo.upsertInput.ID)
+	if repo.upsertEvent.ResourceID != "resource-1" {
+		t.Fatalf("repo event ResourceID = %q, want resource-1", repo.upsertEvent.ResourceID)
 	}
-	if repo.upsertInput.EventTime != eventTime {
-		t.Fatalf("repo input EventTime = %s, want %s", repo.upsertInput.EventTime, eventTime)
+	if repo.upsertEvent.EventTime != eventTime {
+		t.Fatalf("repo event EventTime = %s, want %s", repo.upsertEvent.EventTime, eventTime)
 	}
 }
 
-func TestResourceServiceRejectsInvalidUpsertInput(t *testing.T) {
+func TestResourceServiceRejectsInvalidUpsertEvent(t *testing.T) {
 	repo := &fakeResourceRepository{}
 	service := NewResourceService(repo)
 
-	_, err := service.UpsertResource(context.Background(), resource.UpsertInput{
-		ID:          "",
-		WorkspaceID: "workspace-1",
-		FunctionKey: "todo",
-		DisplayName: "Spec",
-		Type:        "document",
-		Tags:        []string{"section_1"},
-		EventTime:   time.Now(),
+	_, err := service.UpsertResource(context.Background(), resource.ResourceUpsertEvent{
+		ResourceID:   "",
+		WorkspaceID:  "workspace-1",
+		FunctionKey:  "todo",
+		DisplayName:  "Spec",
+		ResourceType: "document",
+		ResourceTags: []string{"section_1"},
+		EventID:      "event-1",
+		EventTime:    time.Now(),
 	})
 	if !errors.Is(err, resource.ErrInvalidInput) {
 		t.Fatalf("error = %v, want ErrInvalidInput", err)

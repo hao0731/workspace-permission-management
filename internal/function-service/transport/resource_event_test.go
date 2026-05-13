@@ -28,14 +28,17 @@ func TestParseResourceUpsertEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseResourceUpsertEvent error = %v, want nil", err)
 	}
-	if got.ID != "resource-1" || got.DisplayName != "Spec" || got.Type != "document" {
-		t.Fatalf("parsed input = %+v, want resource-1/Spec/document", got)
+	if got.ResourceID != "resource-1" || got.DisplayName != "Spec" || got.ResourceType != "document" {
+		t.Fatalf("parsed event = %+v, want resource-1/Spec/document", got)
 	}
 	if got.WorkspaceID != "workspace-1" || got.FunctionKey != "todo" {
 		t.Fatalf("parsed scope = %s/%s, want workspace-1/todo", got.WorkspaceID, got.FunctionKey)
 	}
-	if len(got.Tags) != 1 || got.Tags[0] != "section_1" {
-		t.Fatalf("tags = %#v, want [section_1]", got.Tags)
+	if got.EventID != "event-1" {
+		t.Fatalf("EventID = %q, want event-1", got.EventID)
+	}
+	if len(got.ResourceTags) != 1 || got.ResourceTags[0] != "section_1" {
+		t.Fatalf("tags = %#v, want [section_1]", got.ResourceTags)
 	}
 	wantTime := time.Date(2026, 5, 5, 7, 31, 0, 0, time.UTC)
 	if !got.EventTime.Equal(wantTime) {

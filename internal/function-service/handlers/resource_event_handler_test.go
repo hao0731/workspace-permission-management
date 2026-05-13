@@ -10,12 +10,12 @@ import (
 )
 
 type fakeEventResourceService struct {
-	input resource.UpsertInput
+	event resource.ResourceUpsertEvent
 	err   error
 }
 
-func (f *fakeEventResourceService) UpsertResource(ctx context.Context, input resource.UpsertInput) (resource.UpsertStatus, error) {
-	f.input = input
+func (f *fakeEventResourceService) UpsertResource(ctx context.Context, event resource.ResourceUpsertEvent) (resource.UpsertStatus, error) {
+	f.event = event
 	if f.err != nil {
 		return "", f.err
 	}
@@ -50,8 +50,8 @@ func TestResourceEventHandlerAck(t *testing.T) {
 	if result != eventbus.HandleResultAck {
 		t.Fatalf("result = %q, want ack", result)
 	}
-	if service.input.ID != "resource-1" {
-		t.Fatalf("service input ID = %q, want resource-1", service.input.ID)
+	if service.event.ResourceID != "resource-1" {
+		t.Fatalf("service event ResourceID = %q, want resource-1", service.event.ResourceID)
 	}
 }
 
