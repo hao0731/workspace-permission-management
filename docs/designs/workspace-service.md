@@ -6,7 +6,7 @@ The workspace permission management system uses workspaces as the top-level scop
 
 This document is the entry point for `workspace-service`. Focused endpoint and command details are split into:
 
-- [Workspace Service API Design](workspace-service-api-design.md): `POST /api/v1/workspaces`, `GET /api/v1/workspaces/:workspace_id`, workspace persistence, HR lookup, response contract, and error mapping.
+- [Workspace Service API Design](workspace-service-api-design.md): `POST /api/v1/workspaces`, `GET /api/v1/workspaces/:workspace_id`, `POST /api/v1/workspaces/:workspace_id/favorite`, workspace persistence, favorite persistence, HR lookup, response contract, and error mapping.
 - [Workspace Service Command Design](workspace-service-command-design.md): config-driven resource-create command publishing for `documents`, `tasks`, and `drive`.
 - [Resource Command and Event Domain Contracts](resource-command-event-contracts.md): shared resource command and event types used by workspace, mock-function, and function services.
 
@@ -30,7 +30,8 @@ Required policies:
 Policy alignment:
 
 - HTTP payloads, MongoDB documents, and CloudEvent command payloads are explicit contracts.
-- Handlers stay thin and only parse request bodies or path parameters, invoke services, and render responses or mapped errors.
+- Header-based user identity for favorite mutations is an explicit transport contract.
+- Handlers stay thin and only parse request bodies, path parameters, and headers, invoke services, and render responses or mapped errors.
 - Request and response DTOs belong in `internal/workspace-service/transport`.
 - Workspace domain types and invariants stay independent of Echo, MongoDB, NATS, JetStream, and HR HTTP client details.
 - Cross-service resource command contracts belong in `internal/domain/resource`; workspace sections remain workspace-service context and are not serialized.
@@ -44,6 +45,7 @@ Policy alignment:
 - Build `workspace-service` as an independent backend service.
 - Expose `POST /api/v1/workspaces`.
 - Expose `GET /api/v1/workspaces/:workspace_id`.
+- Expose `POST /api/v1/workspaces/:workspace_id/favorite`.
 - Use `internal/shared/health` for `GET /health/liveness`.
 - Resolve the request `owner` through the shared HR client before creating a workspace.
 - Persist workspace records in MongoDB collection `workspaces`.
@@ -51,6 +53,10 @@ Policy alignment:
 - Return `201 Created` with the created workspace and owner display name from HR.
 - Return `200 OK` with an owner-enriched workspace when `GET /api/v1/workspaces/:workspace_id` finds a workspace.
 - Return `200 OK` with `"workspace": null` when `GET /api/v1/workspaces/:workspace_id` finds no workspace document.
+- Use request header `X-User-Id` as the current user's NT account for favorite mutations.
+- Persist current-user favorite state in MongoDB collection `user_favorite_workspaces`.
+- Return `204 No Content` when setting a workspace as favorite succeeds, when clearing a favorite succeeds, or when clearing a favorite finds no matching favorite document.
+- Return `404 Not Found` when favorite mutation targets a missing workspace.
 - Optionally publish resource-create commands for `documents`, `tasks`, and `drive` when those sections are present in the request.
 - Make resource-create command subjects and payload values config-driven by application mapping.
 - Treat resource-create command publishing as a best-effort side effect after workspace persistence.
@@ -60,6 +66,7 @@ Policy alignment:
 ## Non-Goals
 
 - Do not implement workspace update, delete, list, archive, or search APIs in this phase.
+- Do not implement list-favorite-workspaces or favorite-state read APIs in this phase.
 - Do not implement workspace name uniqueness rules.
 - Do not persist the owner display name in `workspaces`.
 - Do not implement an outbox, retry worker, or guaranteed command delivery for resource-create commands in this phase.
@@ -72,6 +79,7 @@ Policy alignment:
 | --- | --- | --- | --- |
 | `POST /api/v1/workspaces` | [Workspace Service API Design](workspace-service-api-design.md) | `201 Created` with `workspace` object | HR lookup failure returns `502`; resource-command publish failures are logged and do not affect the response |
 | `GET /api/v1/workspaces/:workspace_id` | [Workspace Service API Design](workspace-service-api-design.md#get-workspace-api) | `200 OK` with `workspace` object or `workspace: null` | HR lookup is skipped when the workspace is missing; HR lookup failure for a found workspace returns `502` |
+| `POST /api/v1/workspaces/:workspace_id/favorite` | [Workspace Service API Design](workspace-service-api-design.md#favorite-workspace-api) | `204 No Content` | Missing workspace returns `404`; clearing an absent favorite document still returns `204` |
 | `GET /health/liveness` | This entry design | `200 OK` when the process indicator is healthy | Does not check MongoDB, NATS, or HR availability |
 
 ## Recommended Architecture
@@ -94,10 +102,10 @@ Responsibilities:
 - `cmd/workspace-service`: composition root. It loads configuration, creates the logger, connects to MongoDB and NATS, creates the HR client, ensures repository indexes, registers health and workspace routes, and handles graceful shutdown.
 - `internal/workspace-service/config`: environment-based configuration and validation for HTTP, MongoDB, NATS, HR base URL, resource mappings, publish timeout, and shutdown timeout.
 - `internal/workspace-service/handlers`: Echo handlers for request decoding, service invocation, response rendering, and error mapping.
-- `internal/workspace-service/transport`: request DTOs, nullable and non-null response DTOs, CloudEvent command builders, and DTO/domain mappers.
-- `internal/workspace-service/services`: create-workspace workflow, get-workspace workflow, owner HR lookup orchestration, ID and clock usage, workspace repository calls, and best-effort command publishing orchestration.
-- `internal/workspace-service/repositories`: MongoDB documents, indexes, insert behavior, read-by-ID behavior, and document/domain mapping.
-- `internal/domain/workspace`: workspace model, create input, get query, workspace resource request sections, validation, and stable domain errors.
+- `internal/workspace-service/transport`: request DTOs, nullable and non-null response DTOs, favorite request DTOs, CloudEvent command builders, and DTO/domain mappers.
+- `internal/workspace-service/services`: create-workspace workflow, get-workspace workflow, favorite mutation workflow, owner HR lookup orchestration, ID and clock usage, workspace repository calls, favorite repository calls, and best-effort command publishing orchestration.
+- `internal/workspace-service/repositories`: MongoDB documents, indexes, insert behavior, read-by-ID behavior, workspace existence behavior, favorite upsert/delete behavior, and document/domain mapping.
+- `internal/domain/workspace`: workspace model, create input, get query, favorite input, workspace resource request sections, validation, and stable domain errors.
 - `internal/domain/resource`: shared `ResourceCreateCommand` contract used for command publishing.
 
 The service also depends on shared packages:
@@ -133,12 +141,27 @@ Get workspace:
 6. If HR lookup fails for an existing workspace, service returns an upstream dependency error.
 7. Handler renders `200 OK` with the persisted workspace fields and the HR user display name.
 
+Favorite workspace:
+
+1. Handler reads `workspace_id` from `POST /api/v1/workspaces/:workspace_id/favorite`.
+2. Handler reads `X-User-Id` from the request header as the current user's NT account.
+3. Handler decodes the request body and requires boolean field `favorite`.
+4. Transport or domain validation trims and rejects empty `workspace_id` and `X-User-Id`.
+5. Service verifies that a workspace document exists for `_id = workspace_id`.
+6. If no workspace document exists, service returns a missing-workspace error and the handler renders `404 Not Found`.
+7. If `favorite` is `true`, service upserts one `user_favorite_workspaces` document for `nt_account + workspace_id`, setting `created_at` on insert and `updated_at` on every successful set.
+8. If `favorite` is `false`, service deletes the matching `user_favorite_workspaces` document.
+9. Handler renders `204 No Content` when the set succeeds, when the delete removes a document, or when the delete finds no matching document.
+
 Rationale:
 
 - HR lookup is required before persistence because the public create response includes `owner.display_name`.
 - Persisting only `owner_nt_account` keeps workspace ownership data stable and avoids storing copied HR attributes.
 - The read API also uses HR enrichment because owner display names are intentionally not persisted.
 - Returning `workspace: null` for a missing read target matches the repository's nullable read contracts for GET-style APIs and does not imply that other services were checked.
+- Favorite mutation verifies workspace existence first because it changes user-specific state for a concrete workspace target and should not create dangling favorite records.
+- Clearing a missing favorite is intentionally idempotent so clients can safely send `favorite: false` without first reading current favorite state.
+- Favorite mutation does not call HR because `X-User-Id` represents the authenticated or gateway-provided user identity for this API contract.
 - Best-effort command publishing keeps the first implementation small and matches the requested behavior.
 
 ## Configuration
@@ -202,6 +225,11 @@ The implementation should add `examples/api/workspaces.http` with:
 - Successful workspace create with `documents`, `tasks`, and `drive`.
 - Successful workspace get by ID.
 - Workspace get returning `workspace: null` for a missing ID.
+- Successful workspace favorite set with `X-User-Id`.
+- Successful workspace favorite clear with `X-User-Id`, including the idempotent absent-favorite case.
+- Favorite validation error for missing `X-User-Id`.
+- Favorite validation error for missing `favorite`.
+- Favorite missing workspace returning `404`.
 - Validation error for missing or empty `name`.
 - Validation error for missing or empty `owner`.
 - Validation error for an optional resource object with empty `resource_name`.
@@ -245,8 +273,8 @@ The plan should follow test-driven sequencing:
 
 1. HR domain and shared client interface tests or compile checks.
 2. Workspace domain model, create input, get query, and validation tests.
-3. Workspace transport request, nullable and non-null response, and command event builder tests.
-4. Workspace service create and get workflow tests with fake HR client, repository, publisher, clock, and ID generator.
-5. Workspace repository insert, read-by-ID, not-found, and index tests.
-6. Workspace handler create/get route and error mapping tests.
+3. Workspace transport request, favorite request, nullable and non-null response, and command event builder tests.
+4. Workspace service create, get, and favorite workflow tests with fake HR client, workspace repository, favorite repository, publisher, clock, and ID generator.
+5. Workspace repository insert, read-by-ID, not-found, existence, favorite upsert/delete, and index tests.
+6. Workspace handler create/get/favorite route and error mapping tests.
 7. Config, main wiring, health route, Docker Compose, and REST Client example updates.
