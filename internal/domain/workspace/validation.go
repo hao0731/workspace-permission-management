@@ -97,6 +97,19 @@ func (input CreateInput) Validate() error {
 	return nil
 }
 
+func (query GetQuery) Normalize() GetQuery {
+	query.ID = strings.TrimSpace(query.ID)
+	return query
+}
+
+func (query GetQuery) Validate() error {
+	normalized := query.Normalize()
+	if normalized.ID == "" {
+		return invalidInput("workspace id is required")
+	}
+	return nil
+}
+
 func invalidInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidInput, message)
 }

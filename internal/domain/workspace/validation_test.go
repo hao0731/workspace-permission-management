@@ -38,3 +38,29 @@ func TestCreateInputValidateAcceptsOmittedResources(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
 }
+
+func TestGetQueryNormalize(t *testing.T) {
+	query := GetQuery{ID: " workspace-1 "}
+
+	normalized := query.Normalize()
+
+	if normalized.ID != "workspace-1" {
+		t.Fatalf("Normalize().ID = %q, want workspace-1", normalized.ID)
+	}
+}
+
+func TestGetQueryValidateRejectsEmptyID(t *testing.T) {
+	query := GetQuery{ID: "   "}
+
+	if err := query.Normalize().Validate(); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestGetQueryValidateAcceptsWorkspaceID(t *testing.T) {
+	query := GetQuery{ID: "workspace-1"}
+
+	if err := query.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
