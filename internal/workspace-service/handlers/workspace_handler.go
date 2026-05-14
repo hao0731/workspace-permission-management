@@ -16,6 +16,7 @@ import (
 type HTTPWorkspaceService interface {
 	CreateWorkspace(ctx context.Context, input workspace.CreateInput) (services.CreateWorkspaceResult, error)
 	GetWorkspace(ctx context.Context, input workspace.GetQuery) (services.GetWorkspaceResult, error)
+	SetWorkspaceFavorite(ctx context.Context, input workspace.FavoriteInput) error
 }
 
 type WorkspaceHandler struct {
@@ -33,6 +34,7 @@ func NewWorkspaceHandler(service HTTPWorkspaceService, logger *slog.Logger) *Wor
 func RegisterRoutes(e *echo.Echo, handler *WorkspaceHandler) {
 	e.POST("/api/v1/workspaces", handler.CreateWorkspace)
 	e.GET("/api/v1/workspaces/:workspace_id", handler.GetWorkspace)
+	e.POST("/api/v1/workspaces/:workspace_id/favorite", handler.SetWorkspaceFavorite)
 }
 
 func (h *WorkspaceHandler) CreateWorkspace(c *echo.Context) error {
@@ -77,8 +79,34 @@ func (h *WorkspaceHandler) GetWorkspace(c *echo.Context) error {
 	return c.JSON(http.StatusOK, transport.NewWorkspaceGetResponse(result.Workspace, result.Owner))
 }
 
+func (h *WorkspaceHandler) SetWorkspaceFavorite(c *echo.Context) error {
+	request, err := transport.DecodeWorkspaceFavoriteRequest(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	input, err := request.ToDomain(c.Param("workspace_id"), c.Request().Header.Get("X-User-Id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	if err := h.service.SetWorkspaceFavorite(c.Request().Context(), input); err != nil {
+		if errors.Is(err, workspace.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		if errors.Is(err, workspace.ErrNotFound) {
+			return c.JSON(http.StatusNotFound, workspaceNotFoundError())
+		}
+		h.logger.Warn("failed to set workspace favorite", "err", err, "workspace_id", input.WorkspaceID, "nt_account", input.NTAccount)
+		return c.JSON(http.StatusInternalServerError, internalError())
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
 func validationError(message string) exception.ErrorResponse {
 	return exception.WrapResponse(exception.New("validation_failed", message, exception.WithDetails(map[string]any{})))
+}
+
+func workspaceNotFoundError() exception.ErrorResponse {
+	return exception.WrapResponse(exception.New("workspace_not_found", "Workspace not found", exception.WithDetails(map[string]any{})))
 }
 
 func internalError() exception.ErrorResponse {
