@@ -47,3 +47,36 @@ func TestNewWorkspaceCreateResponse(t *testing.T) {
 		t.Fatal("updated_at is present, want omitted")
 	}
 }
+
+func TestNewWorkspaceGetResponse(t *testing.T) {
+	response := NewWorkspaceGetResponse(workspace.Workspace{
+		ID:             " workspace-1 ",
+		Name:           " Planning ",
+		Description:    " Planning workspace ",
+		OwnerNTAccount: " user1 ",
+	}, domainhr.User{NTAccount: " user1 ", DisplayName: " Test User 測試員 "})
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	want := `{"workspace":{"id":"workspace-1","name":"Planning","description":"Planning workspace","owner":{"nt_account":"user1","display_name":"Test User 測試員"}}}`
+	if string(data) != want {
+		t.Fatalf("body = %s, want %s", data, want)
+	}
+}
+
+func TestNewWorkspaceGetNotFoundResponse(t *testing.T) {
+	response := NewWorkspaceGetNotFoundResponse()
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	want := `{"workspace":null}`
+	if string(data) != want {
+		t.Fatalf("body = %s, want %s", data, want)
+	}
+}

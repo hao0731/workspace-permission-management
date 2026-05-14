@@ -15,6 +15,7 @@ import (
 
 type HTTPWorkspaceService interface {
 	CreateWorkspace(ctx context.Context, input workspace.CreateInput) (services.CreateWorkspaceResult, error)
+	GetWorkspace(ctx context.Context, input workspace.GetQuery) (services.GetWorkspaceResult, error)
 }
 
 type WorkspaceHandler struct {
@@ -31,6 +32,7 @@ func NewWorkspaceHandler(service HTTPWorkspaceService, logger *slog.Logger) *Wor
 
 func RegisterRoutes(e *echo.Echo, handler *WorkspaceHandler) {
 	e.POST("/api/v1/workspaces", handler.CreateWorkspace)
+	e.GET("/api/v1/workspaces/:workspace_id", handler.GetWorkspace)
 }
 
 func (h *WorkspaceHandler) CreateWorkspace(c *echo.Context) error {
@@ -54,6 +56,25 @@ func (h *WorkspaceHandler) CreateWorkspace(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, internalError())
 	}
 	return c.JSON(http.StatusCreated, transport.NewWorkspaceCreateResponse(result.Workspace, result.Owner))
+}
+
+func (h *WorkspaceHandler) GetWorkspace(c *echo.Context) error {
+	workspaceID := c.Param("workspace_id")
+	result, err := h.service.GetWorkspace(c.Request().Context(), workspace.GetQuery{ID: workspaceID})
+	if err != nil {
+		if errors.Is(err, workspace.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		if errors.Is(err, services.ErrHRLookupFailed) {
+			return c.JSON(http.StatusBadGateway, exception.WrapResponse(exception.New("hr_lookup_failed", "Failed to resolve workspace owner")))
+		}
+		h.logger.Warn("failed to get workspace", "err", err, "workspace_id", workspaceID)
+		return c.JSON(http.StatusInternalServerError, internalError())
+	}
+	if !result.Found {
+		return c.JSON(http.StatusOK, transport.NewWorkspaceGetNotFoundResponse())
+	}
+	return c.JSON(http.StatusOK, transport.NewWorkspaceGetResponse(result.Workspace, result.Owner))
 }
 
 func validationError(message string) exception.ErrorResponse {

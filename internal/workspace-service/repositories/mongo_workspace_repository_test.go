@@ -57,6 +57,14 @@ func TestWorkspaceIndexModel(t *testing.T) {
 	}
 }
 
+func TestWorkspaceIDFilter(t *testing.T) {
+	filter := workspaceIDFilter(workspace.GetQuery{ID: "workspace-1"})
+
+	if filter["_id"] != "workspace-1" {
+		t.Fatalf("filter = %#v, want _id workspace-1", filter)
+	}
+}
+
 func TestMongoWorkspaceRepositoryCreateIntegration(t *testing.T) {
 	db := newIntegrationDatabase(t)
 	repo := NewMongoWorkspaceRepository(db)
@@ -84,6 +92,48 @@ func TestMongoWorkspaceRepositoryCreateIntegration(t *testing.T) {
 	}
 	if _, ok := doc["display_name"]; ok {
 		t.Fatal("display_name was persisted, want omitted")
+	}
+}
+
+func TestMongoWorkspaceRepositoryGetIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+
+	if _, err := repo.Create(ctx, workspace.Workspace{
+		ID:             "workspace-1",
+		Name:           "Planning",
+		Description:    "Planning workspace",
+		OwnerNTAccount: "user1",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	got, found, err := repo.Get(ctx, workspace.GetQuery{ID: " workspace-1 "})
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !found {
+		t.Fatal("Get() found = false, want true")
+	}
+	if got.ID != "workspace-1" || got.Name != "Planning" || got.OwnerNTAccount != "user1" {
+		t.Fatalf("Get() = %+v", got)
+	}
+}
+
+func TestMongoWorkspaceRepositoryGetMissingIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+
+	got, found, err := repo.Get(context.Background(), workspace.GetQuery{ID: "missing-workspace"})
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if found {
+		t.Fatalf("Get() found = true with workspace %+v, want false", got)
 	}
 }
 

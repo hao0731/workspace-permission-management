@@ -1,4 +1,5 @@
 @baseUrl = http://localhost:8083
+@workspaceId = workspace-1
 
 ### Create workspace without optional resources
 POST {{baseUrl}}/api/v1/workspaces
@@ -28,6 +29,12 @@ Content-Type: application/json
     "resource_name": "Delivery drive"
   }
 }
+
+### Get workspace by ID
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}
+
+### Get missing workspace returns workspace null
+GET {{baseUrl}}/api/v1/workspaces/missing-workspace
 
 ### Missing owner returns 400
 POST {{baseUrl}}/api/v1/workspaces

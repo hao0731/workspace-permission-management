@@ -31,3 +31,7 @@ type CreateInput struct {
 	Tasks          *ResourceRequest
 	Drive          *ResourceRequest
 }
+
+type GetQuery struct {
+	ID string
+}
