@@ -17,6 +17,10 @@ type WorkspaceCreateRequest struct {
 	Drive       *ResourceRequest `json:"drive"`
 }
 
+type WorkspaceFavoriteRequest struct {
+	Favorite *bool `json:"favorite"`
+}
+
 type ResourceRequest struct {
 	ResourceName string `json:"resource_name"`
 }
@@ -26,6 +30,15 @@ func DecodeWorkspaceCreateRequest(body io.Reader) (WorkspaceCreateRequest, error
 	decoder := json.NewDecoder(body)
 	if err := decoder.Decode(&request); err != nil {
 		return WorkspaceCreateRequest{}, fmt.Errorf("decode workspace create request: %w", err)
+	}
+	return request, nil
+}
+
+func DecodeWorkspaceFavoriteRequest(body io.Reader) (WorkspaceFavoriteRequest, error) {
+	var request WorkspaceFavoriteRequest
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(&request); err != nil {
+		return WorkspaceFavoriteRequest{}, fmt.Errorf("decode workspace favorite request: %w", err)
 	}
 	return request, nil
 }
@@ -41,6 +54,21 @@ func (request WorkspaceCreateRequest) ToDomain() (workspace.CreateInput, error) 
 	}.Normalize()
 	if err := input.Validate(); err != nil {
 		return workspace.CreateInput{}, err
+	}
+	return input, nil
+}
+
+func (request WorkspaceFavoriteRequest) ToDomain(workspaceID string, ntAccount string) (workspace.FavoriteInput, error) {
+	if request.Favorite == nil {
+		return workspace.FavoriteInput{}, fmt.Errorf("%w: favorite is required", workspace.ErrInvalidInput)
+	}
+	input := workspace.FavoriteInput{
+		WorkspaceID: workspaceID,
+		NTAccount:   ntAccount,
+		Favorite:    *request.Favorite,
+	}.Normalize()
+	if err := input.Validate(); err != nil {
+		return workspace.FavoriteInput{}, err
 	}
 	return input, nil
 }
