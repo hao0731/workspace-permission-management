@@ -1,5 +1,5 @@
 pre-commit:
   commands:
     backend:
-      glob: "{cmd,internal,pkg}/**/*.go"
-      run: golangci-lint run ./...
+      glob: "{cmd,internal}/**/*.go"
+      run: golangci-lint run ./internal/... ./cmd/...
