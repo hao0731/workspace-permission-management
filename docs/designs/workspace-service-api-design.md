@@ -2,7 +2,7 @@
 
 ## Background
 
-`workspace-service` creates workspace records and returns an owner-enriched response. The service stores the stable owner NT account in MongoDB and resolves display names through the shared HR client.
+`workspace-service` creates workspace records and reads a workspace by ID with owner-enriched responses. The service stores the stable owner NT account in MongoDB and resolves display names through the shared HR client.
 
 Entry point and common service concerns are documented in [Workspace Service Design](workspace-service.md). Resource-create command publishing is documented in [Workspace Service Command Design](workspace-service-command-design.md). HR APIs and the shared HR client are documented in [Mock HR Design](mock-hr.md).
 
@@ -18,28 +18,31 @@ Required policies:
 Policy alignment:
 
 - The REST payload, response payload, and MongoDB document are explicit contracts.
-- HTTP handlers remain thin and only parse input, invoke services, and render mapped responses or errors.
+- HTTP handlers remain thin and only parse input or path parameters, invoke services, and render mapped responses or errors.
 - Request and response DTOs belong in `internal/workspace-service/transport`.
 - Workspace domain types and validation remain independent of Echo, MongoDB, NATS, and HR HTTP client details.
-- The service owns ID generation, timestamp assignment, HR lookup orchestration, persistence orchestration, and post-persistence command publishing.
+- The service owns ID generation, timestamp assignment, HR lookup orchestration, persistence orchestration, nullable read orchestration, and post-persistence command publishing.
 - MongoDB access remains isolated in `internal/workspace-service/repositories`.
 - This design is stored under `docs/designs/` and linked from the workspace-service entry design.
 
 ## Goals
 
 - Expose `POST /api/v1/workspaces`.
+- Expose `GET /api/v1/workspaces/:workspace_id`.
 - Accept `name`, `description`, `owner`, and optional `documents`, `tasks`, and `drive` resource-create requests.
 - Resolve `owner` by calling `internal/shared/interactions/hr.Client.Get`.
 - Fail the create request when HR lookup fails.
 - Persist a workspace document after successful HR lookup.
 - Store only the owner NT account in MongoDB.
 - Return `201 Created` with the created workspace and HR display name.
+- Return `200 OK` with the owner-enriched workspace when a workspace ID exists.
+- Return `200 OK` with `"workspace": null` when a workspace ID does not exist.
 - Keep resource-create command publishing outside the database transaction and outside the handler.
 - Keep validation and persistence aligned with existing backend boundaries.
 
 ## Non-Goals
 
-- Do not implement workspace read, list, update, delete, archive, or search APIs.
+- Do not implement workspace list, update, delete, archive, or search APIs.
 - Do not persist owner display names.
 - Do not enforce workspace name uniqueness.
 - Do not validate whether optional resource target applications exist in another service.
@@ -111,9 +114,61 @@ Response field contract:
 - `workspace.owner.display_name` comes from the HR client response and is not persisted in the workspace document.
 - `created_at` and `updated_at` are persistence metadata and are not included in the public response in this phase.
 
+## Get Workspace API
+
+Endpoint:
+
+```http
+GET /api/v1/workspaces/:workspace_id
+```
+
+Path parameters:
+
+- `workspace_id`: required workspace ID. This maps to `workspaces._id`.
+
+Success response when the workspace exists:
+
+```http
+HTTP/1.1 200 OK
+```
+
+```json
+{
+  "workspace": {
+    "id": "workspace-1",
+    "name": "Workspace Name",
+    "description": "Workspace description",
+    "owner": {
+      "nt_account": "user1",
+      "display_name": "Test User 測試員"
+    }
+  }
+}
+```
+
+Success response when the workspace does not exist:
+
+```http
+HTTP/1.1 200 OK
+```
+
+```json
+{
+  "workspace": null
+}
+```
+
+Response field contract:
+
+- `workspace.id`, `workspace.name`, and `workspace.description` come from the persisted workspace document.
+- `workspace.owner.nt_account` is the persisted `owner_nt_account`.
+- `workspace.owner.display_name` comes from the HR client response and is not persisted in the workspace document.
+- `workspace: null` means no workspace document exists for the supplied `workspace_id`.
+- `workspace: null` does not mean related groups, function resources, permissions, or external systems were checked.
+
 ## Request Validation
 
-Transport-level validation should reject:
+Create request transport-level validation should reject:
 
 - Malformed JSON.
 - Missing `name`.
@@ -134,6 +189,12 @@ Normalization rules:
 
 Domain or service validation should reject empty identity fields after transport mapping. Resource option validation should happen before persistence so invalid resource names never create a workspace.
 
+Get request validation should reject:
+
+- Empty or whitespace-only `workspace_id` after trimming.
+
+The service should trim `workspace_id` before repository lookup and should not otherwise transform it.
+
 ## HR Lookup
 
 `workspace-service` uses the shared HR client interface:
@@ -152,11 +213,19 @@ For create:
 - If the call returns any error, return `502 Bad Gateway`.
 - On HR failure, do not insert a workspace document and do not publish any resource-create commands.
 
+For get:
+
+- Read the workspace document first.
+- If no workspace document exists, return `200 OK` with `"workspace": null` and do not call HR.
+- If a workspace document exists, call `Client.Get(ctx, workspace.OwnerNTAccount)`.
+- If the call succeeds, use the returned `hr.User.DisplayName` only for the response.
+- If the call returns any error, return `502 Bad Gateway`.
+
 Rationale:
 
-- The create response requires `owner.display_name`.
+- Create and found get responses require `owner.display_name`.
 - The workspace document intentionally stores only `owner_nt_account`.
-- Treating HR lookup failure as an upstream dependency failure keeps the create response complete and deterministic.
+- Treating HR lookup failure as an upstream dependency failure keeps owner-enriched responses complete and deterministic.
 
 ## workspaces Collection
 
@@ -184,6 +253,12 @@ Field notes:
 - `created_at` and `updated_at` are service-generated timestamps.
 - Owner display name is intentionally not stored.
 
+Repository operations:
+
+- `Create(ctx, workspace)` inserts a new document.
+- `Get(ctx, query)` reads one document by `_id`.
+- Missing reads should return an empty optional result rather than a repository failure.
+
 Indexes:
 
 ```txt
@@ -192,7 +267,8 @@ Indexes:
 
 Rationale:
 
-- The first implementation only creates workspaces, but indexing by owner and creation time is a reasonable foundation for a future owner-scoped list API.
+- The first implementation creates workspaces and reads them by `_id`; MongoDB already indexes `_id`.
+- Indexing by owner and creation time remains a reasonable foundation for a future owner-scoped list API.
 - No unique index is defined for `name` because workspace name uniqueness is not a confirmed product rule.
 
 ## Service Workflow
@@ -207,11 +283,26 @@ Successful create:
 6. Publish those commands using the best-effort behavior documented in [Workspace Service Command Design](workspace-service-command-design.md).
 7. Return the created workspace with owner display name from HR.
 
+Successful get with a found workspace:
+
+1. Validate and normalize `workspace_id`.
+2. Read the workspace document by `_id`.
+3. Call HR client `Get(ctx, workspace.OwnerNTAccount)`.
+4. Return the persisted workspace fields with owner display name from HR.
+
+Successful get with a missing workspace:
+
+1. Validate and normalize `workspace_id`.
+2. Read the workspace document by `_id`.
+3. Return `workspace: null` when the repository reports no document.
+4. Do not call HR.
+
 Failure behavior:
 
 - Request validation failure returns `400 Bad Request`.
-- HR lookup failure returns `502 Bad Gateway` and performs no persistence or publishing.
+- HR lookup failure returns `502 Bad Gateway`; create performs no persistence or publishing, and get does not render a partial workspace.
 - MongoDB insert failure returns `500 Internal Server Error` and performs no publishing.
+- MongoDB read failure returns `500 Internal Server Error`.
 - Resource command publish failure is logged and does not alter the `201 Created` response.
 
 ## Error Mapping
@@ -232,7 +323,8 @@ Known errors should use the shared backend error response shape:
 Status mapping:
 
 - `400 Bad Request`: malformed JSON, invalid request shape, or invalid field values.
-- `502 Bad Gateway`: HR client lookup failure for the owner.
+- `200 OK`: successful get, including a missing workspace represented as `"workspace": null`.
+- `502 Bad Gateway`: HR client lookup failure for the owner of a create request or a found workspace read.
 - `500 Internal Server Error`: unexpected repository, ID generation, clock, or infrastructure failure.
 
 Stable error codes:
@@ -246,7 +338,8 @@ Stable error codes:
 `examples/api/workspaces.http` should include:
 
 ```http
-@baseUrl = http://localhost:8082
+@baseUrl = http://localhost:8083
+@workspaceId = workspace-1
 
 ### Create workspace without optional resources
 POST {{baseUrl}}/api/v1/workspaces
@@ -298,6 +391,12 @@ Content-Type: application/json
     "resource_name": ""
   }
 }
+
+### Get workspace by ID
+GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}
+
+### Get missing workspace returns workspace null
+GET {{baseUrl}}/api/v1/workspaces/missing-workspace
 ```
 
 The implementation should align the default `baseUrl` with the local Docker Compose HTTP port chosen for `workspace-service`.
@@ -310,6 +409,8 @@ Domain tests:
 - Create input rejects empty optional resource names when present.
 - Create input accepts omitted `documents`, `tasks`, and `drive`.
 - Create input trims string fields before validation.
+- Get query rejects empty `workspace_id`.
+- Get query trims `workspace_id`.
 
 Transport tests:
 
@@ -317,6 +418,8 @@ Transport tests:
 - Decode valid create request with all optional resources.
 - Decode malformed JSON as validation failure.
 - Map domain workspace and HR user into the expected response DTO.
+- Map domain workspace and HR user into the expected get response DTO.
+- Encode missing get responses as exactly `{ "workspace": null }`.
 
 Service tests:
 
@@ -327,16 +430,25 @@ Service tests:
 - Repository insert failure publishes no commands.
 - Publish failures after insert are logged and do not fail the service result.
 - Commands are attempted in deterministic order: `documents`, `tasks`, then `drive`.
+- Successful get reads the repository before calling HR.
+- Successful get returns owner display name from HR.
+- Missing get returns an empty optional result and does not call HR.
+- HR failure for a found get returns an upstream dependency error.
+- Repository read failure returns an internal error.
 
 Repository tests:
 
 - Insert writes `_id`, `name`, `description`, `owner_nt_account`, `created_at`, and `updated_at`.
 - Insert does not write owner display name.
+- Get reads by `_id`.
+- Get returns an empty optional result when MongoDB reports no document.
 - Ensure indexes creates the owner-created index.
 
 Handler tests:
 
 - `POST /api/v1/workspaces` returns `201` and the response contract.
+- `GET /api/v1/workspaces/:workspace_id` returns `200` and the workspace response contract when found.
+- `GET /api/v1/workspaces/:workspace_id` returns `200` with `workspace: null` when missing.
 - Validation failures return `400` with shared error shape.
 - HR failures return `502` with `hr_lookup_failed`.
 - Repository failures return `500`.

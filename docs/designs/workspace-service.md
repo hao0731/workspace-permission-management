@@ -2,11 +2,11 @@
 
 ## Background
 
-The workspace permission management system uses workspaces as the top-level scope for groups, function resources, and permissions. This design introduces `workspace-service` as the service that creates workspace records and optionally asks configured application functions to create initial resources for the workspace.
+The workspace permission management system uses workspaces as the top-level scope for groups, function resources, and permissions. This design introduces `workspace-service` as the service that creates and reads workspace records, and optionally asks configured application functions to create initial resources for the workspace.
 
 This document is the entry point for `workspace-service`. Focused endpoint and command details are split into:
 
-- [Workspace Service API Design](workspace-service-api-design.md): `POST /api/v1/workspaces`, workspace persistence, HR lookup, response contract, and error mapping.
+- [Workspace Service API Design](workspace-service-api-design.md): `POST /api/v1/workspaces`, `GET /api/v1/workspaces/:workspace_id`, workspace persistence, HR lookup, response contract, and error mapping.
 - [Workspace Service Command Design](workspace-service-command-design.md): config-driven resource-create command publishing for `documents`, `tasks`, and `drive`.
 - [Resource Command and Event Domain Contracts](resource-command-event-contracts.md): shared resource command and event types used by workspace, mock-function, and function services.
 
@@ -30,7 +30,7 @@ Required policies:
 Policy alignment:
 
 - HTTP payloads, MongoDB documents, and CloudEvent command payloads are explicit contracts.
-- Handlers stay thin and only parse request bodies, invoke services, and render responses or mapped errors.
+- Handlers stay thin and only parse request bodies or path parameters, invoke services, and render responses or mapped errors.
 - Request and response DTOs belong in `internal/workspace-service/transport`.
 - Workspace domain types and invariants stay independent of Echo, MongoDB, NATS, JetStream, and HR HTTP client details.
 - Cross-service resource command contracts belong in `internal/domain/resource`; workspace sections remain workspace-service context and are not serialized.
@@ -43,11 +43,14 @@ Policy alignment:
 
 - Build `workspace-service` as an independent backend service.
 - Expose `POST /api/v1/workspaces`.
+- Expose `GET /api/v1/workspaces/:workspace_id`.
 - Use `internal/shared/health` for `GET /health/liveness`.
 - Resolve the request `owner` through the shared HR client before creating a workspace.
 - Persist workspace records in MongoDB collection `workspaces`.
 - Store only `owner_nt_account` in the workspace document; do not persist HR display names.
 - Return `201 Created` with the created workspace and owner display name from HR.
+- Return `200 OK` with an owner-enriched workspace when `GET /api/v1/workspaces/:workspace_id` finds a workspace.
+- Return `200 OK` with `"workspace": null` when `GET /api/v1/workspaces/:workspace_id` finds no workspace document.
 - Optionally publish resource-create commands for `documents`, `tasks`, and `drive` when those sections are present in the request.
 - Make resource-create command subjects and payload values config-driven by application mapping.
 - Treat resource-create command publishing as a best-effort side effect after workspace persistence.
@@ -56,7 +59,7 @@ Policy alignment:
 
 ## Non-Goals
 
-- Do not implement workspace read, update, delete, list, or search APIs in this phase.
+- Do not implement workspace update, delete, list, archive, or search APIs in this phase.
 - Do not implement workspace name uniqueness rules.
 - Do not persist the owner display name in `workspaces`.
 - Do not implement an outbox, retry worker, or guaranteed command delivery for resource-create commands in this phase.
@@ -68,6 +71,7 @@ Policy alignment:
 | Endpoint | Design | Success | External dependency behavior |
 | --- | --- | --- | --- |
 | `POST /api/v1/workspaces` | [Workspace Service API Design](workspace-service-api-design.md) | `201 Created` with `workspace` object | HR lookup failure returns `502`; resource-command publish failures are logged and do not affect the response |
+| `GET /api/v1/workspaces/:workspace_id` | [Workspace Service API Design](workspace-service-api-design.md#get-workspace-api) | `200 OK` with `workspace` object or `workspace: null` | HR lookup is skipped when the workspace is missing; HR lookup failure for a found workspace returns `502` |
 | `GET /health/liveness` | This entry design | `200 OK` when the process indicator is healthy | Does not check MongoDB, NATS, or HR availability |
 
 ## Recommended Architecture
@@ -90,10 +94,10 @@ Responsibilities:
 - `cmd/workspace-service`: composition root. It loads configuration, creates the logger, connects to MongoDB and NATS, creates the HR client, ensures repository indexes, registers health and workspace routes, and handles graceful shutdown.
 - `internal/workspace-service/config`: environment-based configuration and validation for HTTP, MongoDB, NATS, HR base URL, resource mappings, publish timeout, and shutdown timeout.
 - `internal/workspace-service/handlers`: Echo handlers for request decoding, service invocation, response rendering, and error mapping.
-- `internal/workspace-service/transport`: request DTOs, response DTOs, CloudEvent command builders, and DTO/domain mappers.
-- `internal/workspace-service/services`: create-workspace workflow, owner HR lookup orchestration, ID and clock usage, workspace repository calls, and best-effort command publishing orchestration.
-- `internal/workspace-service/repositories`: MongoDB documents, indexes, insert behavior, and document/domain mapping.
-- `internal/domain/workspace`: workspace model, create input, workspace resource request sections, validation, and stable domain errors.
+- `internal/workspace-service/transport`: request DTOs, nullable and non-null response DTOs, CloudEvent command builders, and DTO/domain mappers.
+- `internal/workspace-service/services`: create-workspace workflow, get-workspace workflow, owner HR lookup orchestration, ID and clock usage, workspace repository calls, and best-effort command publishing orchestration.
+- `internal/workspace-service/repositories`: MongoDB documents, indexes, insert behavior, read-by-ID behavior, and document/domain mapping.
+- `internal/domain/workspace`: workspace model, create input, get query, workspace resource request sections, validation, and stable domain errors.
 - `internal/domain/resource`: shared `ResourceCreateCommand` contract used for command publishing.
 
 The service also depends on shared packages:
@@ -119,10 +123,22 @@ Create workspace:
 10. Publish failures are logged with structured fields and do not change the returned `201`.
 11. Handler renders the created workspace response using persisted workspace fields and the HR user display name.
 
+Get workspace:
+
+1. Handler reads `workspace_id` from `GET /api/v1/workspaces/:workspace_id`.
+2. Transport or domain validation trims and rejects an empty `workspace_id`.
+3. Service reads one workspace document by `_id`.
+4. If no document exists, service returns an empty optional result and the handler renders `200 OK` with `"workspace": null`.
+5. If a document exists, service calls HR client `Get(ctx, ownerNTAccount)` to resolve `owner.display_name`.
+6. If HR lookup fails for an existing workspace, service returns an upstream dependency error.
+7. Handler renders `200 OK` with the persisted workspace fields and the HR user display name.
+
 Rationale:
 
 - HR lookup is required before persistence because the public create response includes `owner.display_name`.
 - Persisting only `owner_nt_account` keeps workspace ownership data stable and avoids storing copied HR attributes.
+- The read API also uses HR enrichment because owner display names are intentionally not persisted.
+- Returning `workspace: null` for a missing read target matches the repository's nullable read contracts for GET-style APIs and does not imply that other services were checked.
 - Best-effort command publishing keeps the first implementation small and matches the requested behavior.
 
 ## Configuration
@@ -184,6 +200,8 @@ The implementation should add `examples/api/workspaces.http` with:
 
 - Successful workspace create without optional resources.
 - Successful workspace create with `documents`, `tasks`, and `drive`.
+- Successful workspace get by ID.
+- Workspace get returning `workspace: null` for a missing ID.
 - Validation error for missing or empty `name`.
 - Validation error for missing or empty `owner`.
 - Validation error for an optional resource object with empty `resource_name`.
@@ -208,7 +226,8 @@ Additional repository integration tests may require local MongoDB from Docker Co
 - Independent service boundary: keeps workspace creation ownership separate from group and function projections, at the cost of adding a service entrypoint and configuration surface.
 - Split design documents: keeps this entry document readable while preserving traceability from one service-level entry point.
 - HR lookup before persistence: ensures the create response can include `owner.display_name`, but means temporary HR outage blocks workspace creation.
-- Persist only `owner_nt_account`: avoids stale copied HR attributes, but future read APIs must call HR to enrich owner display names.
+- Persist only `owner_nt_account`: avoids stale copied HR attributes, but read APIs must call HR to enrich owner display names when a workspace exists.
+- Nullable read response: `GET /api/v1/workspaces/:workspace_id` returns `200 OK` with `workspace: null` for missing records, matching existing read contracts at the cost of clients needing to distinguish null from an object.
 - Best-effort command publishing: matches the requested simple flow and avoids outbox complexity, but command delivery is not guaranteed after workspace persistence.
 - No workspace name uniqueness: avoids defining product rules early, but clients cannot rely on names being unique.
 
@@ -225,9 +244,9 @@ Any implementation plan should be created under `docs/plans/active/` and link ba
 The plan should follow test-driven sequencing:
 
 1. HR domain and shared client interface tests or compile checks.
-2. Workspace domain model and validation tests.
-3. Workspace transport request, response, and command event builder tests.
-4. Workspace service workflow tests with fake HR client, repository, publisher, clock, and ID generator.
-5. Workspace repository insert and index tests.
-6. Workspace handler route and error mapping tests.
+2. Workspace domain model, create input, get query, and validation tests.
+3. Workspace transport request, nullable and non-null response, and command event builder tests.
+4. Workspace service create and get workflow tests with fake HR client, repository, publisher, clock, and ID generator.
+5. Workspace repository insert, read-by-ID, not-found, and index tests.
+6. Workspace handler create/get route and error mapping tests.
 7. Config, main wiring, health route, Docker Compose, and REST Client example updates.
