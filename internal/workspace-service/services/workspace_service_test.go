@@ -15,9 +15,14 @@ import (
 )
 
 type fakeWorkspaceRepository struct {
-	input workspace.Workspace
-	calls int
-	err   error
+	input        workspace.Workspace
+	calls        int
+	err          error
+	getQuery     workspace.GetQuery
+	getCalls     int
+	getWorkspace workspace.Workspace
+	getFound     bool
+	getErr       error
 }
 
 func (f *fakeWorkspaceRepository) Create(_ context.Context, input workspace.Workspace) (workspace.Workspace, error) {
@@ -27,6 +32,15 @@ func (f *fakeWorkspaceRepository) Create(_ context.Context, input workspace.Work
 		return workspace.Workspace{}, f.err
 	}
 	return input, nil
+}
+
+func (f *fakeWorkspaceRepository) Get(_ context.Context, query workspace.GetQuery) (workspace.Workspace, bool, error) {
+	f.getCalls++
+	f.getQuery = query
+	if f.getErr != nil {
+		return workspace.Workspace{}, false, f.getErr
+	}
+	return f.getWorkspace, f.getFound, nil
 }
 
 type fakeHRClient struct {
@@ -178,6 +192,87 @@ func TestWorkspaceServicePublishFailureReturnsSuccessAndContinues(t *testing.T) 
 	}
 	if !strings.Contains(logBuffer.String(), "failed to publish resource create command") {
 		t.Fatalf("log = %s", logBuffer.String())
+	}
+}
+
+func TestWorkspaceServiceGetWorkspaceFound(t *testing.T) {
+	repo := &fakeWorkspaceRepository{
+		getWorkspace: workspace.Workspace{
+			ID:             "workspace-1",
+			Name:           "Planning",
+			Description:    "Planning workspace",
+			OwnerNTAccount: "user1",
+		},
+		getFound: true,
+	}
+	hrClient := &fakeHRClient{user: domainhr.User{NTAccount: "user1", DisplayName: "Test User 測試員"}}
+	service := NewWorkspaceService(repo, hrClient, nil)
+
+	result, err := service.GetWorkspace(context.Background(), workspace.GetQuery{ID: " workspace-1 "})
+	if err != nil {
+		t.Fatalf("GetWorkspace() error = %v", err)
+	}
+	if !result.Found {
+		t.Fatal("GetWorkspace() Found = false, want true")
+	}
+	if result.Workspace.ID != "workspace-1" || result.Owner.DisplayName != "Test User 測試員" {
+		t.Fatalf("result = %+v", result)
+	}
+	if repo.getQuery.ID != "workspace-1" {
+		t.Fatalf("repo query = %+v, want trimmed workspace id", repo.getQuery)
+	}
+	if hrClient.calls != 1 || hrClient.input != "user1" {
+		t.Fatalf("hr calls=%d input=%q, want 1/user1", hrClient.calls, hrClient.input)
+	}
+}
+
+func TestWorkspaceServiceGetWorkspaceMissingDoesNotCallHR(t *testing.T) {
+	repo := &fakeWorkspaceRepository{getFound: false}
+	hrClient := &fakeHRClient{user: domainhr.User{NTAccount: "user1", DisplayName: "Test User 測試員"}}
+	service := NewWorkspaceService(repo, hrClient, nil)
+
+	result, err := service.GetWorkspace(context.Background(), workspace.GetQuery{ID: "missing-workspace"})
+	if err != nil {
+		t.Fatalf("GetWorkspace() error = %v", err)
+	}
+	if result.Found {
+		t.Fatalf("GetWorkspace() Found = true with result %+v, want false", result)
+	}
+	if hrClient.calls != 0 {
+		t.Fatalf("hr calls = %d, want 0", hrClient.calls)
+	}
+}
+
+func TestWorkspaceServiceGetWorkspaceHRFailure(t *testing.T) {
+	repo := &fakeWorkspaceRepository{
+		getWorkspace: workspace.Workspace{
+			ID:             "workspace-1",
+			Name:           "Planning",
+			Description:    "Planning workspace",
+			OwnerNTAccount: "user1",
+		},
+		getFound: true,
+	}
+	hrClient := &fakeHRClient{err: errors.New("hr unavailable")}
+	service := NewWorkspaceService(repo, hrClient, nil)
+
+	_, err := service.GetWorkspace(context.Background(), workspace.GetQuery{ID: "workspace-1"})
+	if !errors.Is(err, ErrHRLookupFailed) {
+		t.Fatalf("GetWorkspace() error = %v, want ErrHRLookupFailed", err)
+	}
+}
+
+func TestWorkspaceServiceGetWorkspaceRepositoryFailure(t *testing.T) {
+	repo := &fakeWorkspaceRepository{getErr: errors.New("find failed")}
+	hrClient := &fakeHRClient{}
+	service := NewWorkspaceService(repo, hrClient, nil)
+
+	_, err := service.GetWorkspace(context.Background(), workspace.GetQuery{ID: "workspace-1"})
+	if err == nil {
+		t.Fatal("GetWorkspace() error = nil, want error")
+	}
+	if hrClient.calls != 0 {
+		t.Fatalf("hr calls = %d, want 0", hrClient.calls)
 	}
 }
 

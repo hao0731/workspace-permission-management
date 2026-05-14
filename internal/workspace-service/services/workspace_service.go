@@ -19,6 +19,7 @@ var ErrHRLookupFailed = errors.New("hr lookup failed")
 
 type WorkspaceRepository interface {
 	Create(ctx context.Context, input workspace.Workspace) (workspace.Workspace, error)
+	Get(ctx context.Context, query workspace.GetQuery) (workspace.Workspace, bool, error)
 }
 
 type ResourceCreateCommandPublisher interface {
@@ -33,6 +34,12 @@ type sectionResourceCreateCommand struct {
 type CreateWorkspaceResult struct {
 	Workspace workspace.Workspace
 	Owner     domainhr.User
+}
+
+type GetWorkspaceResult struct {
+	Workspace workspace.Workspace
+	Owner     domainhr.User
+	Found     bool
 }
 
 type ResourceMapping struct {
@@ -134,6 +141,27 @@ func (s *WorkspaceService) CreateWorkspace(ctx context.Context, input workspace.
 	s.publishResourceCreateCommands(ctx, created.ID, input)
 
 	return CreateWorkspaceResult{Workspace: created, Owner: owner}, nil
+}
+
+func (s *WorkspaceService) GetWorkspace(ctx context.Context, query workspace.GetQuery) (GetWorkspaceResult, error) {
+	query = query.Normalize()
+	if err := query.Validate(); err != nil {
+		return GetWorkspaceResult{}, err
+	}
+
+	model, found, err := s.repository.Get(ctx, query)
+	if err != nil {
+		return GetWorkspaceResult{}, fmt.Errorf("get workspace: %w", err)
+	}
+	if !found {
+		return GetWorkspaceResult{Found: false}, nil
+	}
+
+	owner, err := s.hrClient.Get(ctx, model.OwnerNTAccount)
+	if err != nil {
+		return GetWorkspaceResult{}, fmt.Errorf("%w: %w", ErrHRLookupFailed, err)
+	}
+	return GetWorkspaceResult{Workspace: model, Owner: owner.Normalize(), Found: true}, nil
 }
 
 func (s *WorkspaceService) publishResourceCreateCommands(ctx context.Context, workspaceID string, input workspace.CreateInput) {
