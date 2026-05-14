@@ -35,3 +35,17 @@ type CreateInput struct {
 type GetQuery struct {
 	ID string
 }
+
+type FavoriteInput struct {
+	WorkspaceID string
+	NTAccount   string
+	Favorite    bool
+}
+
+type UserFavoriteWorkspace struct {
+	ID          string
+	NTAccount   string
+	WorkspaceID string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}

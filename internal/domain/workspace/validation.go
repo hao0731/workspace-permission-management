@@ -110,6 +110,50 @@ func (query GetQuery) Validate() error {
 	return nil
 }
 
+func (input FavoriteInput) Normalize() FavoriteInput {
+	input.WorkspaceID = strings.TrimSpace(input.WorkspaceID)
+	input.NTAccount = strings.TrimSpace(input.NTAccount)
+	return input
+}
+
+func (input FavoriteInput) Validate() error {
+	normalized := input.Normalize()
+	if normalized.WorkspaceID == "" {
+		return invalidInput("workspace id is required")
+	}
+	if normalized.NTAccount == "" {
+		return invalidInput("nt account is required")
+	}
+	return nil
+}
+
+func (w UserFavoriteWorkspace) Normalize() UserFavoriteWorkspace {
+	w.ID = strings.TrimSpace(w.ID)
+	w.NTAccount = strings.TrimSpace(w.NTAccount)
+	w.WorkspaceID = strings.TrimSpace(w.WorkspaceID)
+	return w
+}
+
+func (w UserFavoriteWorkspace) Validate() error {
+	normalized := w.Normalize()
+	if normalized.ID == "" {
+		return invalidInput("favorite id is required")
+	}
+	if normalized.NTAccount == "" {
+		return invalidInput("nt account is required")
+	}
+	if normalized.WorkspaceID == "" {
+		return invalidInput("workspace id is required")
+	}
+	if normalized.CreatedAt.IsZero() {
+		return invalidInput("created at is required")
+	}
+	if normalized.UpdatedAt.IsZero() {
+		return invalidInput("updated at is required")
+	}
+	return nil
+}
+
 func invalidInput(message string) error {
 	return fmt.Errorf("%w: %s", ErrInvalidInput, message)
 }

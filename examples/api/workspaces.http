@@ -1,5 +1,6 @@
 @baseUrl = http://localhost:8083
 @workspaceId = workspace-1
+@userId = user1
 
 ### Create workspace without optional resources
 POST {{baseUrl}}/api/v1/workspaces
@@ -35,6 +36,48 @@ GET {{baseUrl}}/api/v1/workspaces/{{workspaceId}}
 
 ### Get missing workspace returns workspace null
 GET {{baseUrl}}/api/v1/workspaces/missing-workspace
+
+### Mark workspace as favorite
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/favorite
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{
+  "favorite": true
+}
+
+### Clear workspace favorite idempotently
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/favorite
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{
+  "favorite": false
+}
+
+### Missing favorite header returns 400
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/favorite
+Content-Type: application/json
+
+{
+  "favorite": true
+}
+
+### Missing favorite field returns 400
+POST {{baseUrl}}/api/v1/workspaces/{{workspaceId}}/favorite
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{}
+
+### Favorite missing workspace returns 404
+POST {{baseUrl}}/api/v1/workspaces/missing-workspace/favorite
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{
+  "favorite": true
+}
 
 ### Missing owner returns 400
 POST {{baseUrl}}/api/v1/workspaces

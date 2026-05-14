@@ -65,6 +65,122 @@ func TestWorkspaceIDFilter(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExistsProjection(t *testing.T) {
+	projection := workspaceExistsProjection()
+
+	if len(projection) != 1 || projection["_id"] != 1 {
+		t.Fatalf("projection = %#v, want only _id", projection)
+	}
+}
+
+func TestUserFavoriteWorkspaceDocumentMapping(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	doc := userFavoriteWorkspaceDocument{
+		ID:          "favorite-1",
+		NTAccount:   "user1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	got := doc.toDomain()
+
+	if got.ID != "favorite-1" || got.NTAccount != "user1" || got.WorkspaceID != "workspace-1" {
+		t.Fatalf("toDomain() = %+v", got)
+	}
+}
+
+func TestUserFavoriteWorkspaceFilter(t *testing.T) {
+	filter := userFavoriteWorkspaceFilter(workspace.FavoriteInput{
+		WorkspaceID: " workspace-1 ",
+		NTAccount:   " user1 ",
+	})
+
+	if filter["workspace_id"] != "workspace-1" || filter["nt_account"] != "user1" {
+		t.Fatalf("filter = %#v, want workspace/user", filter)
+	}
+}
+
+func TestUserFavoriteWorkspaceUniqueIndexModel(t *testing.T) {
+	index := userFavoriteWorkspaceUniqueIndexModel()
+	keys, ok := index.Keys.(bson.D)
+	if !ok {
+		t.Fatalf("keys type = %T, want bson.D", index.Keys)
+	}
+	want := bson.D{
+		{Key: "nt_account", Value: 1},
+		{Key: "workspace_id", Value: 1},
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("keys = %#v, want %#v", keys, want)
+	}
+	for i := range want {
+		if keys[i] != want[i] {
+			t.Fatalf("keys = %#v, want %#v", keys, want)
+		}
+	}
+	if index.Options == nil {
+		t.Fatal("Options = nil, want unique index options")
+	}
+}
+
+func TestUserFavoriteWorkspaceUpsertUpdate(t *testing.T) {
+	createdAt := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	doc := userFavoriteWorkspaceDocument{
+		ID:          "favorite-1",
+		NTAccount:   "user1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   createdAt,
+		UpdatedAt:   updatedAt,
+	}
+
+	update := userFavoriteWorkspaceUpsertUpdate(doc)
+
+	setOnInsert, ok := update["$setOnInsert"].(bson.M)
+	if !ok {
+		t.Fatalf("$setOnInsert = %#v, want bson.M", update["$setOnInsert"])
+	}
+	createdAtValue, ok := setOnInsert["created_at"].(time.Time)
+	if !ok {
+		t.Fatalf("$setOnInsert created_at = %#v, want time.Time", setOnInsert["created_at"])
+	}
+	if setOnInsert["_id"] != "favorite-1" ||
+		setOnInsert["nt_account"] != "user1" ||
+		setOnInsert["workspace_id"] != "workspace-1" ||
+		!createdAtValue.Equal(createdAt) {
+		t.Fatalf("$setOnInsert = %#v, want favorite identity and created_at", setOnInsert)
+	}
+
+	set, ok := update["$set"].(bson.M)
+	if !ok {
+		t.Fatalf("$set = %#v, want bson.M", update["$set"])
+	}
+	updatedAtValue, ok := set["updated_at"].(time.Time)
+	if !ok {
+		t.Fatalf("$set updated_at = %#v, want time.Time", set["updated_at"])
+	}
+	if !updatedAtValue.Equal(updatedAt) {
+		t.Fatalf("$set = %#v, want updated_at %v", set, updatedAt)
+	}
+	if _, ok := set["created_at"]; ok {
+		t.Fatalf("$set = %#v, want created_at to be insert-only", set)
+	}
+}
+
+func TestUserFavoriteWorkspaceUpsertOptions(t *testing.T) {
+	var got options.UpdateOneOptions
+	for _, apply := range userFavoriteWorkspaceUpsertOptions().List() {
+		if err := apply(&got); err != nil {
+			t.Fatalf("apply update option: %v", err)
+		}
+	}
+
+	if got.Upsert == nil || !*got.Upsert {
+		t.Fatalf("Upsert = %v, want true", got.Upsert)
+	}
+}
+
 func TestMongoWorkspaceRepositoryCreateIntegration(t *testing.T) {
 	db := newIntegrationDatabase(t)
 	repo := NewMongoWorkspaceRepository(db)
@@ -134,6 +250,145 @@ func TestMongoWorkspaceRepositoryGetMissingIntegration(t *testing.T) {
 	}
 	if found {
 		t.Fatalf("Get() found = true with workspace %+v, want false", got)
+	}
+}
+
+func TestMongoWorkspaceRepositoryExistsIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+
+	if _, err := repo.Create(ctx, workspace.Workspace{
+		ID:             "workspace-1",
+		Name:           "Planning",
+		Description:    "Planning workspace",
+		OwnerNTAccount: "user1",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	found, err := repo.Exists(ctx, workspace.GetQuery{ID: " workspace-1 "})
+	if err != nil {
+		t.Fatalf("Exists() error = %v", err)
+	}
+	if !found {
+		t.Fatal("Exists() found = false, want true")
+	}
+
+	found, err = repo.Exists(ctx, workspace.GetQuery{ID: "missing-workspace"})
+	if err != nil {
+		t.Fatalf("Exists() missing error = %v", err)
+	}
+	if found {
+		t.Fatal("Exists() found = true, want false")
+	}
+}
+
+func TestMongoWorkspaceRepositoryUpsertFavoriteInsertsIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+
+	err := repo.UpsertFavorite(ctx, workspace.UserFavoriteWorkspace{
+		ID:          "favorite-1",
+		NTAccount:   " user1 ",
+		WorkspaceID: " workspace-1 ",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("UpsertFavorite() error = %v, want nil", err)
+	}
+
+	var doc bson.M
+	if err := db.Collection("user_favorite_workspaces").FindOne(ctx, bson.M{"nt_account": "user1", "workspace_id": "workspace-1"}).Decode(&doc); err != nil {
+		t.Fatalf("find favorite: %v", err)
+	}
+	if doc["_id"] != "favorite-1" {
+		t.Fatalf("_id = %v, want favorite-1", doc["_id"])
+	}
+}
+
+func TestMongoWorkspaceRepositoryUpsertFavoriteUpdatesTimestampIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+
+	if err := repo.UpsertFavorite(ctx, workspace.UserFavoriteWorkspace{
+		ID:          "favorite-1",
+		NTAccount:   "user1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   createdAt,
+		UpdatedAt:   createdAt,
+	}); err != nil {
+		t.Fatalf("initial UpsertFavorite() error = %v", err)
+	}
+	if err := repo.UpsertFavorite(ctx, workspace.UserFavoriteWorkspace{
+		ID:          "favorite-2",
+		NTAccount:   "user1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   updatedAt,
+		UpdatedAt:   updatedAt,
+	}); err != nil {
+		t.Fatalf("second UpsertFavorite() error = %v", err)
+	}
+
+	var doc userFavoriteWorkspaceDocument
+	if err := db.Collection("user_favorite_workspaces").FindOne(ctx, bson.M{"nt_account": "user1", "workspace_id": "workspace-1"}).Decode(&doc); err != nil {
+		t.Fatalf("find favorite: %v", err)
+	}
+	if doc.ID != "favorite-1" {
+		t.Fatalf("ID = %q, want original favorite-1", doc.ID)
+	}
+	if !doc.CreatedAt.Equal(createdAt) {
+		t.Fatalf("CreatedAt = %v, want %v", doc.CreatedAt, createdAt)
+	}
+	if !doc.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("UpdatedAt = %v, want %v", doc.UpdatedAt, updatedAt)
+	}
+}
+
+func TestMongoWorkspaceRepositoryDeleteFavoriteIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+
+	if err := repo.UpsertFavorite(ctx, workspace.UserFavoriteWorkspace{
+		ID:          "favorite-1",
+		NTAccount:   "user1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("UpsertFavorite() error = %v", err)
+	}
+	if err := repo.DeleteFavorite(ctx, workspace.FavoriteInput{WorkspaceID: " workspace-1 ", NTAccount: " user1 "}); err != nil {
+		t.Fatalf("DeleteFavorite() error = %v, want nil", err)
+	}
+
+	count, err := db.Collection("user_favorite_workspaces").CountDocuments(ctx, bson.M{"nt_account": "user1", "workspace_id": "workspace-1"})
+	if err != nil {
+		t.Fatalf("count favorites: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("count = %d, want 0", count)
+	}
+}
+
+func TestMongoWorkspaceRepositoryDeleteFavoriteMissingIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+
+	err := repo.DeleteFavorite(context.Background(), workspace.FavoriteInput{WorkspaceID: "workspace-1", NTAccount: "user1"})
+	if err != nil {
+		t.Fatalf("DeleteFavorite() error = %v, want nil for missing favorite", err)
 	}
 }
 

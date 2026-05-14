@@ -3,6 +3,7 @@ package workspace
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestCreateInputValidateRejectsRequiredFields(t *testing.T) {
@@ -62,5 +63,77 @@ func TestGetQueryValidateAcceptsWorkspaceID(t *testing.T) {
 
 	if err := query.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestFavoriteInputNormalize(t *testing.T) {
+	input := FavoriteInput{
+		WorkspaceID: " workspace-1 ",
+		NTAccount:   " user1 ",
+		Favorite:    false,
+	}
+
+	normalized := input.Normalize()
+
+	if normalized.WorkspaceID != "workspace-1" || normalized.NTAccount != "user1" {
+		t.Fatalf("Normalize() = %+v, want trimmed workspace/user", normalized)
+	}
+	if normalized.Favorite {
+		t.Fatal("Normalize().Favorite = true, want false preserved")
+	}
+}
+
+func TestFavoriteInputValidateRejectsEmptyIdentity(t *testing.T) {
+	tests := []FavoriteInput{
+		{NTAccount: "user1", Favorite: true},
+		{WorkspaceID: "workspace-1", Favorite: true},
+		{WorkspaceID: "   ", NTAccount: "user1", Favorite: true},
+		{WorkspaceID: "workspace-1", NTAccount: "   ", Favorite: true},
+	}
+	for _, input := range tests {
+		if err := input.Normalize().Validate(); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("Validate() error = %v, want ErrInvalidInput for input %+v", err, input)
+		}
+	}
+}
+
+func TestFavoriteInputValidateAcceptsFavoriteFalse(t *testing.T) {
+	input := FavoriteInput{WorkspaceID: "workspace-1", NTAccount: "user1", Favorite: false}
+
+	if err := input.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestUserFavoriteWorkspaceNormalize(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	model := UserFavoriteWorkspace{
+		ID:          " favorite-1 ",
+		NTAccount:   " user1 ",
+		WorkspaceID: " workspace-1 ",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	normalized := model.Normalize()
+
+	if normalized.ID != "favorite-1" || normalized.NTAccount != "user1" || normalized.WorkspaceID != "workspace-1" {
+		t.Fatalf("Normalize() = %+v, want trimmed identity fields", normalized)
+	}
+}
+
+func TestUserFavoriteWorkspaceValidateRejectsMissingFields(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	tests := []UserFavoriteWorkspace{
+		{NTAccount: "user1", WorkspaceID: "workspace-1", CreatedAt: now, UpdatedAt: now},
+		{ID: "favorite-1", WorkspaceID: "workspace-1", CreatedAt: now, UpdatedAt: now},
+		{ID: "favorite-1", NTAccount: "user1", CreatedAt: now, UpdatedAt: now},
+		{ID: "favorite-1", NTAccount: "user1", WorkspaceID: "workspace-1", UpdatedAt: now},
+		{ID: "favorite-1", NTAccount: "user1", WorkspaceID: "workspace-1", CreatedAt: now},
+	}
+	for _, model := range tests {
+		if err := model.Normalize().Validate(); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("Validate() error = %v, want ErrInvalidInput for model %+v", err, model)
+		}
 	}
 }

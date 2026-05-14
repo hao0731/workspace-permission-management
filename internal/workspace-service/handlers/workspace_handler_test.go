@@ -16,12 +16,15 @@ import (
 )
 
 type fakeHTTPWorkspaceService struct {
-	result    services.CreateWorkspaceResult
-	err       error
-	input     workspace.CreateInput
-	getResult services.GetWorkspaceResult
-	getErr    error
-	getInput  workspace.GetQuery
+	result        services.CreateWorkspaceResult
+	err           error
+	input         workspace.CreateInput
+	getResult     services.GetWorkspaceResult
+	getErr        error
+	getInput      workspace.GetQuery
+	favoriteInput workspace.FavoriteInput
+	favoriteErr   error
+	favoriteCalls int
 }
 
 func (f *fakeHTTPWorkspaceService) CreateWorkspace(_ context.Context, input workspace.CreateInput) (services.CreateWorkspaceResult, error) {
@@ -38,6 +41,15 @@ func (f *fakeHTTPWorkspaceService) GetWorkspace(_ context.Context, input workspa
 		return services.GetWorkspaceResult{}, f.getErr
 	}
 	return f.getResult, nil
+}
+
+func (f *fakeHTTPWorkspaceService) SetWorkspaceFavorite(_ context.Context, input workspace.FavoriteInput) error {
+	f.favoriteCalls++
+	f.favoriteInput = input
+	if f.favoriteErr != nil {
+		return f.favoriteErr
+	}
+	return nil
 }
 
 func TestWorkspaceHandlerCreateWorkspace(t *testing.T) {
@@ -224,6 +236,106 @@ func TestWorkspaceHandlerGetWorkspaceMapsUnexpectedError(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHandlerSetWorkspaceFavorite(t *testing.T) {
+	e := echo.New()
+	service := &fakeHTTPWorkspaceService{}
+	RegisterRoutes(e, NewWorkspaceHandler(service, slog.Default()))
+
+	req := workspaceFavoriteRequest(`{"favorite":true}`)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	if service.favoriteCalls != 1 {
+		t.Fatalf("favorite calls = %d, want 1", service.favoriteCalls)
+	}
+	if service.favoriteInput.WorkspaceID != "workspace-1" || service.favoriteInput.NTAccount != "user1" || !service.favoriteInput.Favorite {
+		t.Fatalf("favorite input = %+v, want workspace/user true", service.favoriteInput)
+	}
+}
+
+func TestWorkspaceHandlerClearWorkspaceFavorite(t *testing.T) {
+	e := echo.New()
+	service := &fakeHTTPWorkspaceService{}
+	RegisterRoutes(e, NewWorkspaceHandler(service, slog.Default()))
+
+	req := workspaceFavoriteRequest(`{"favorite":false}`)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	if service.favoriteInput.Favorite {
+		t.Fatalf("favorite input = %+v, want favorite false", service.favoriteInput)
+	}
+}
+
+func TestWorkspaceHandlerSetWorkspaceFavoriteRejectsMissingHeader(t *testing.T) {
+	e := echo.New()
+	service := &fakeHTTPWorkspaceService{}
+	RegisterRoutes(e, NewWorkspaceHandler(service, slog.Default()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/favorite", strings.NewReader(`{"favorite":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"validation_failed"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if service.favoriteCalls != 0 {
+		t.Fatalf("favorite calls = %d, want 0", service.favoriteCalls)
+	}
+}
+
+func TestWorkspaceHandlerSetWorkspaceFavoriteRejectsMissingFavorite(t *testing.T) {
+	e := echo.New()
+	service := &fakeHTTPWorkspaceService{}
+	RegisterRoutes(e, NewWorkspaceHandler(service, slog.Default()))
+
+	req := workspaceFavoriteRequest(`{}`)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"validation_failed"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if service.favoriteCalls != 0 {
+		t.Fatalf("favorite calls = %d, want 0", service.favoriteCalls)
+	}
+}
+
+func TestWorkspaceHandlerSetWorkspaceFavoriteMapsMissingWorkspace(t *testing.T) {
+	e := echo.New()
+	service := &fakeHTTPWorkspaceService{favoriteErr: workspace.ErrNotFound}
+	RegisterRoutes(e, NewWorkspaceHandler(service, slog.Default()))
+
+	req := workspaceFavoriteRequest(`{"favorite":true}`)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"code":"workspace_not_found"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWorkspaceHandlerSetWorkspaceFavoriteMapsUnexpectedError(t *testing.T) {
+	e := echo.New()
+	service := &fakeHTTPWorkspaceService{favoriteErr: errors.New("database down")}
+	RegisterRoutes(e, NewWorkspaceHandler(service, slog.Default()))
+
+	req := workspaceFavoriteRequest(`{"favorite":true}`)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), `"code":"internal_error"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func validWorkspaceRequest() *http.Request {
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces", strings.NewReader(`{
 		"name":"Planning",
@@ -231,5 +343,12 @@ func validWorkspaceRequest() *http.Request {
 		"owner":"user1"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func workspaceFavoriteRequest(body string) *http.Request {
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/workspaces/workspace-1/favorite", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "user1")
 	return req
 }

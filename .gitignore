@@ -1,6 +1,7 @@
 # Local environment
 
 .env
+.worktrees/
 
 # Frontend
 

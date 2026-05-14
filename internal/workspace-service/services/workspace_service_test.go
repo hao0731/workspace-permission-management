@@ -15,14 +15,24 @@ import (
 )
 
 type fakeWorkspaceRepository struct {
-	input        workspace.Workspace
-	calls        int
-	err          error
-	getQuery     workspace.GetQuery
-	getCalls     int
-	getWorkspace workspace.Workspace
-	getFound     bool
-	getErr       error
+	input         workspace.Workspace
+	calls         int
+	err           error
+	getQuery      workspace.GetQuery
+	getCalls      int
+	getWorkspace  workspace.Workspace
+	getFound      bool
+	getErr        error
+	existsQuery   workspace.GetQuery
+	existsCalls   int
+	existsFound   bool
+	existsErr     error
+	favoriteInput workspace.UserFavoriteWorkspace
+	favoriteCalls int
+	favoriteErr   error
+	deleteInput   workspace.FavoriteInput
+	deleteCalls   int
+	deleteErr     error
 }
 
 func (f *fakeWorkspaceRepository) Create(_ context.Context, input workspace.Workspace) (workspace.Workspace, error) {
@@ -41,6 +51,33 @@ func (f *fakeWorkspaceRepository) Get(_ context.Context, query workspace.GetQuer
 		return workspace.Workspace{}, false, f.getErr
 	}
 	return f.getWorkspace, f.getFound, nil
+}
+
+func (f *fakeWorkspaceRepository) Exists(_ context.Context, query workspace.GetQuery) (bool, error) {
+	f.existsCalls++
+	f.existsQuery = query
+	if f.existsErr != nil {
+		return false, f.existsErr
+	}
+	return f.existsFound, nil
+}
+
+func (f *fakeWorkspaceRepository) UpsertFavorite(_ context.Context, input workspace.UserFavoriteWorkspace) error {
+	f.favoriteCalls++
+	f.favoriteInput = input
+	if f.favoriteErr != nil {
+		return f.favoriteErr
+	}
+	return nil
+}
+
+func (f *fakeWorkspaceRepository) DeleteFavorite(_ context.Context, input workspace.FavoriteInput) error {
+	f.deleteCalls++
+	f.deleteInput = input
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	return nil
 }
 
 type fakeHRClient struct {
@@ -273,6 +310,131 @@ func TestWorkspaceServiceGetWorkspaceRepositoryFailure(t *testing.T) {
 	}
 	if hrClient.calls != 0 {
 		t.Fatalf("hr calls = %d, want 0", hrClient.calls)
+	}
+}
+
+func TestWorkspaceServiceSetWorkspaceFavoriteUpsertsWhenWorkspaceExists(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	repo := &fakeWorkspaceRepository{existsFound: true}
+	hrClient := &fakeHRClient{}
+	service := NewWorkspaceService(repo, hrClient, nil,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(sequenceIDs("favorite-1")),
+	)
+
+	err := service.SetWorkspaceFavorite(context.Background(), workspace.FavoriteInput{
+		WorkspaceID: " workspace-1 ",
+		NTAccount:   " user1 ",
+		Favorite:    true,
+	})
+	if err != nil {
+		t.Fatalf("SetWorkspaceFavorite() error = %v, want nil", err)
+	}
+	if repo.existsCalls != 1 || repo.existsQuery.ID != "workspace-1" {
+		t.Fatalf("exists calls=%d query=%+v, want workspace existence check", repo.existsCalls, repo.existsQuery)
+	}
+	if repo.getCalls != 0 {
+		t.Fatalf("get calls = %d, want 0 because favorite only needs existence", repo.getCalls)
+	}
+	if repo.favoriteCalls != 1 {
+		t.Fatalf("favorite calls = %d, want 1", repo.favoriteCalls)
+	}
+	if repo.favoriteInput.ID != "favorite-1" || repo.favoriteInput.NTAccount != "user1" || repo.favoriteInput.WorkspaceID != "workspace-1" {
+		t.Fatalf("favorite input = %+v", repo.favoriteInput)
+	}
+	if !repo.favoriteInput.CreatedAt.Equal(now) || !repo.favoriteInput.UpdatedAt.Equal(now) {
+		t.Fatalf("favorite timestamps = %+v, want %v", repo.favoriteInput, now)
+	}
+	if hrClient.calls != 0 {
+		t.Fatalf("hr calls = %d, want 0", hrClient.calls)
+	}
+}
+
+func TestWorkspaceServiceSetWorkspaceFavoriteMissingWorkspace(t *testing.T) {
+	repo := &fakeWorkspaceRepository{existsFound: false}
+	service := NewWorkspaceService(repo, &fakeHRClient{}, nil)
+
+	err := service.SetWorkspaceFavorite(context.Background(), workspace.FavoriteInput{
+		WorkspaceID: "missing-workspace",
+		NTAccount:   "user1",
+		Favorite:    true,
+	})
+	if !errors.Is(err, workspace.ErrNotFound) {
+		t.Fatalf("SetWorkspaceFavorite() error = %v, want ErrNotFound", err)
+	}
+	if repo.existsCalls != 1 || repo.getCalls != 0 {
+		t.Fatalf("exists calls=%d get calls=%d, want exists only", repo.existsCalls, repo.getCalls)
+	}
+	if repo.favoriteCalls != 0 || repo.deleteCalls != 0 {
+		t.Fatalf("favorite calls=%d delete calls=%d, want no favorite write", repo.favoriteCalls, repo.deleteCalls)
+	}
+}
+
+func TestWorkspaceServiceClearWorkspaceFavoriteDeletesWhenWorkspaceExists(t *testing.T) {
+	repo := &fakeWorkspaceRepository{existsFound: true}
+	service := NewWorkspaceService(repo, &fakeHRClient{}, nil)
+
+	err := service.SetWorkspaceFavorite(context.Background(), workspace.FavoriteInput{
+		WorkspaceID: " workspace-1 ",
+		NTAccount:   " user1 ",
+		Favorite:    false,
+	})
+	if err != nil {
+		t.Fatalf("SetWorkspaceFavorite() error = %v, want nil", err)
+	}
+	if repo.deleteCalls != 1 {
+		t.Fatalf("delete calls = %d, want 1", repo.deleteCalls)
+	}
+	if repo.deleteInput.WorkspaceID != "workspace-1" || repo.deleteInput.NTAccount != "user1" {
+		t.Fatalf("delete input = %+v, want trimmed identity", repo.deleteInput)
+	}
+	if repo.favoriteCalls != 0 {
+		t.Fatalf("favorite calls = %d, want 0", repo.favoriteCalls)
+	}
+}
+
+func TestWorkspaceServiceFavoriteRepositoryFailure(t *testing.T) {
+	repo := &fakeWorkspaceRepository{existsFound: true, favoriteErr: errors.New("favorite write failed")}
+	service := NewWorkspaceService(repo, &fakeHRClient{}, nil, WithIDGenerator(sequenceIDs("favorite-1")))
+
+	err := service.SetWorkspaceFavorite(context.Background(), workspace.FavoriteInput{
+		WorkspaceID: "workspace-1",
+		NTAccount:   "user1",
+		Favorite:    true,
+	})
+	if err == nil {
+		t.Fatal("SetWorkspaceFavorite() error = nil, want error")
+	}
+}
+
+func TestWorkspaceServiceClearFavoriteRepositoryFailure(t *testing.T) {
+	repo := &fakeWorkspaceRepository{existsFound: true, deleteErr: errors.New("favorite delete failed")}
+	service := NewWorkspaceService(repo, &fakeHRClient{}, nil)
+
+	err := service.SetWorkspaceFavorite(context.Background(), workspace.FavoriteInput{
+		WorkspaceID: "workspace-1",
+		NTAccount:   "user1",
+		Favorite:    false,
+	})
+	if err == nil {
+		t.Fatal("SetWorkspaceFavorite() error = nil, want error")
+	}
+}
+
+func TestWorkspaceServiceFavoriteExistsRepositoryFailure(t *testing.T) {
+	repo := &fakeWorkspaceRepository{existsErr: errors.New("exists failed")}
+	service := NewWorkspaceService(repo, &fakeHRClient{}, nil)
+
+	err := service.SetWorkspaceFavorite(context.Background(), workspace.FavoriteInput{
+		WorkspaceID: "workspace-1",
+		NTAccount:   "user1",
+		Favorite:    true,
+	})
+	if err == nil {
+		t.Fatal("SetWorkspaceFavorite() error = nil, want error")
+	}
+	if repo.favoriteCalls != 0 || repo.deleteCalls != 0 {
+		t.Fatalf("favorite calls=%d delete calls=%d, want no favorite write", repo.favoriteCalls, repo.deleteCalls)
 	}
 }
 
