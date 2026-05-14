@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -46,6 +47,27 @@ func (r *MongoWorkspaceRepository) Create(ctx context.Context, input workspace.W
 		return workspace.Workspace{}, fmt.Errorf("insert workspace: %w", err)
 	}
 	return doc.toDomain(), nil
+}
+
+func (r *MongoWorkspaceRepository) Get(ctx context.Context, query workspace.GetQuery) (workspace.Workspace, bool, error) {
+	query = query.Normalize()
+	if err := query.Validate(); err != nil {
+		return workspace.Workspace{}, false, err
+	}
+
+	var doc workspaceDocument
+	if err := r.collection.FindOne(ctx, workspaceIDFilter(query)).Decode(&doc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return workspace.Workspace{}, false, nil
+		}
+		return workspace.Workspace{}, false, fmt.Errorf("find workspace: %w", err)
+	}
+	return doc.toDomain(), true, nil
+}
+
+func workspaceIDFilter(query workspace.GetQuery) bson.M {
+	query = query.Normalize()
+	return bson.M{"_id": query.ID}
 }
 
 func workspaceIndexModel() mongo.IndexModel {
