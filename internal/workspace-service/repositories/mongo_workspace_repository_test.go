@@ -65,6 +65,14 @@ func TestWorkspaceIDFilter(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExistsProjection(t *testing.T) {
+	projection := workspaceExistsProjection()
+
+	if len(projection) != 1 || projection["_id"] != 1 {
+		t.Fatalf("projection = %#v, want only _id", projection)
+	}
+}
+
 func TestUserFavoriteWorkspaceDocumentMapping(t *testing.T) {
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	doc := userFavoriteWorkspaceDocument{
@@ -113,6 +121,63 @@ func TestUserFavoriteWorkspaceUniqueIndexModel(t *testing.T) {
 	}
 	if index.Options == nil {
 		t.Fatal("Options = nil, want unique index options")
+	}
+}
+
+func TestUserFavoriteWorkspaceUpsertUpdate(t *testing.T) {
+	createdAt := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	doc := userFavoriteWorkspaceDocument{
+		ID:          "favorite-1",
+		NTAccount:   "user1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   createdAt,
+		UpdatedAt:   updatedAt,
+	}
+
+	update := userFavoriteWorkspaceUpsertUpdate(doc)
+
+	setOnInsert, ok := update["$setOnInsert"].(bson.M)
+	if !ok {
+		t.Fatalf("$setOnInsert = %#v, want bson.M", update["$setOnInsert"])
+	}
+	createdAtValue, ok := setOnInsert["created_at"].(time.Time)
+	if !ok {
+		t.Fatalf("$setOnInsert created_at = %#v, want time.Time", setOnInsert["created_at"])
+	}
+	if setOnInsert["_id"] != "favorite-1" ||
+		setOnInsert["nt_account"] != "user1" ||
+		setOnInsert["workspace_id"] != "workspace-1" ||
+		!createdAtValue.Equal(createdAt) {
+		t.Fatalf("$setOnInsert = %#v, want favorite identity and created_at", setOnInsert)
+	}
+
+	set, ok := update["$set"].(bson.M)
+	if !ok {
+		t.Fatalf("$set = %#v, want bson.M", update["$set"])
+	}
+	updatedAtValue, ok := set["updated_at"].(time.Time)
+	if !ok {
+		t.Fatalf("$set updated_at = %#v, want time.Time", set["updated_at"])
+	}
+	if !updatedAtValue.Equal(updatedAt) {
+		t.Fatalf("$set = %#v, want updated_at %v", set, updatedAt)
+	}
+	if _, ok := set["created_at"]; ok {
+		t.Fatalf("$set = %#v, want created_at to be insert-only", set)
+	}
+}
+
+func TestUserFavoriteWorkspaceUpsertOptions(t *testing.T) {
+	var got options.UpdateOneOptions
+	for _, apply := range userFavoriteWorkspaceUpsertOptions().List() {
+		if err := apply(&got); err != nil {
+			t.Fatalf("apply update option: %v", err)
+		}
+	}
+
+	if got.Upsert == nil || !*got.Upsert {
+		t.Fatalf("Upsert = %v, want true", got.Upsert)
 	}
 }
 
@@ -185,6 +250,40 @@ func TestMongoWorkspaceRepositoryGetMissingIntegration(t *testing.T) {
 	}
 	if found {
 		t.Fatalf("Get() found = true with workspace %+v, want false", got)
+	}
+}
+
+func TestMongoWorkspaceRepositoryExistsIntegration(t *testing.T) {
+	db := newIntegrationDatabase(t)
+	repo := NewMongoWorkspaceRepository(db)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+
+	if _, err := repo.Create(ctx, workspace.Workspace{
+		ID:             "workspace-1",
+		Name:           "Planning",
+		Description:    "Planning workspace",
+		OwnerNTAccount: "user1",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	found, err := repo.Exists(ctx, workspace.GetQuery{ID: " workspace-1 "})
+	if err != nil {
+		t.Fatalf("Exists() error = %v", err)
+	}
+	if !found {
+		t.Fatal("Exists() found = false, want true")
+	}
+
+	found, err = repo.Exists(ctx, workspace.GetQuery{ID: "missing-workspace"})
+	if err != nil {
+		t.Fatalf("Exists() missing error = %v", err)
+	}
+	if found {
+		t.Fatal("Exists() found = true, want false")
 	}
 }
 

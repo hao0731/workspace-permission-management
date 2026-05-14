@@ -20,6 +20,7 @@ var ErrHRLookupFailed = errors.New("hr lookup failed")
 type WorkspaceRepository interface {
 	Create(ctx context.Context, input workspace.Workspace) (workspace.Workspace, error)
 	Get(ctx context.Context, query workspace.GetQuery) (workspace.Workspace, bool, error)
+	Exists(ctx context.Context, query workspace.GetQuery) (bool, error)
 	UpsertFavorite(ctx context.Context, input workspace.UserFavoriteWorkspace) error
 	DeleteFavorite(ctx context.Context, input workspace.FavoriteInput) error
 }
@@ -172,9 +173,9 @@ func (s *WorkspaceService) SetWorkspaceFavorite(ctx context.Context, input works
 		return err
 	}
 
-	_, found, err := s.repository.Get(ctx, workspace.GetQuery{ID: input.WorkspaceID})
+	found, err := s.repository.Exists(ctx, workspace.GetQuery{ID: input.WorkspaceID})
 	if err != nil {
-		return fmt.Errorf("get workspace for favorite: %w", err)
+		return fmt.Errorf("check workspace existence for favorite: %w", err)
 	}
 	if !found {
 		return workspace.ErrNotFound

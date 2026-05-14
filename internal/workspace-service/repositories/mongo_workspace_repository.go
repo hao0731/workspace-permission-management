@@ -84,6 +84,27 @@ func (r *MongoWorkspaceRepository) Get(ctx context.Context, query workspace.GetQ
 	return doc.toDomain(), true, nil
 }
 
+func (r *MongoWorkspaceRepository) Exists(ctx context.Context, query workspace.GetQuery) (bool, error) {
+	query = query.Normalize()
+	if err := query.Validate(); err != nil {
+		return false, err
+	}
+
+	var doc struct {
+		ID string `bson:"_id"`
+	}
+	if err := r.workspaces.FindOne(ctx,
+		workspaceIDFilter(query),
+		options.FindOne().SetProjection(workspaceExistsProjection()),
+	).Decode(&doc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, nil
+		}
+		return false, fmt.Errorf("find workspace existence: %w", err)
+	}
+	return true, nil
+}
+
 func (r *MongoWorkspaceRepository) UpsertFavorite(ctx context.Context, input workspace.UserFavoriteWorkspace) error {
 	input = input.Normalize()
 	if err := input.Validate(); err != nil {
@@ -95,34 +116,13 @@ func (r *MongoWorkspaceRepository) UpsertFavorite(ctx context.Context, input wor
 		NTAccount:   doc.NTAccount,
 	})
 
-	result, err := r.favorites.UpdateOne(ctx, filter, bson.M{
-		"$set": bson.M{"updated_at": doc.UpdatedAt},
-	})
-	if err != nil {
-		return fmt.Errorf("update workspace favorite: %w", err)
-	}
-	if result.MatchedCount > 0 {
-		return nil
-	}
-
-	if _, err := r.favorites.InsertOne(ctx, doc); err != nil {
-		if mongo.IsDuplicateKeyError(err) {
-			return r.updateFavoriteTimestamp(ctx, filter, doc.UpdatedAt)
-		}
-		return fmt.Errorf("insert workspace favorite: %w", err)
-	}
-	return nil
-}
-
-func (r *MongoWorkspaceRepository) updateFavoriteTimestamp(ctx context.Context, filter bson.M, updatedAt time.Time) error {
-	result, err := r.favorites.UpdateOne(ctx, filter, bson.M{
-		"$set": bson.M{"updated_at": updatedAt},
-	})
-	if err != nil {
-		return fmt.Errorf("retry update workspace favorite: %w", err)
-	}
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("retry update workspace favorite: document not found after duplicate key")
+	if _, err := r.favorites.UpdateOne(
+		ctx,
+		filter,
+		userFavoriteWorkspaceUpsertUpdate(doc),
+		userFavoriteWorkspaceUpsertOptions(),
+	); err != nil {
+		return fmt.Errorf("upsert workspace favorite: %w", err)
 	}
 	return nil
 }
@@ -141,6 +141,10 @@ func (r *MongoWorkspaceRepository) DeleteFavorite(ctx context.Context, input wor
 func workspaceIDFilter(query workspace.GetQuery) bson.M {
 	query = query.Normalize()
 	return bson.M{"_id": query.ID}
+}
+
+func workspaceExistsProjection() bson.M {
+	return bson.M{"_id": 1}
 }
 
 func userFavoriteWorkspaceFilter(input workspace.FavoriteInput) bson.M {
@@ -166,6 +170,24 @@ func userFavoriteWorkspaceUniqueIndexModel() mongo.IndexModel {
 		},
 		Options: options.Index().SetUnique(true),
 	}
+}
+
+func userFavoriteWorkspaceUpsertUpdate(doc userFavoriteWorkspaceDocument) bson.M {
+	return bson.M{
+		"$setOnInsert": bson.M{
+			"_id":          doc.ID,
+			"nt_account":   doc.NTAccount,
+			"workspace_id": doc.WorkspaceID,
+			"created_at":   doc.CreatedAt,
+		},
+		"$set": bson.M{
+			"updated_at": doc.UpdatedAt,
+		},
+	}
+}
+
+func userFavoriteWorkspaceUpsertOptions() *options.UpdateOneOptionsBuilder {
+	return options.UpdateOne().SetUpsert(true)
 }
 
 func newWorkspaceDocument(input workspace.Workspace) workspaceDocument {
