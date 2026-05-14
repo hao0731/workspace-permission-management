@@ -20,6 +20,8 @@ var ErrHRLookupFailed = errors.New("hr lookup failed")
 type WorkspaceRepository interface {
 	Create(ctx context.Context, input workspace.Workspace) (workspace.Workspace, error)
 	Get(ctx context.Context, query workspace.GetQuery) (workspace.Workspace, bool, error)
+	UpsertFavorite(ctx context.Context, input workspace.UserFavoriteWorkspace) error
+	DeleteFavorite(ctx context.Context, input workspace.FavoriteInput) error
 }
 
 type ResourceCreateCommandPublisher interface {
@@ -162,6 +164,41 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, query workspace.Get
 		return GetWorkspaceResult{}, fmt.Errorf("%w: %w", ErrHRLookupFailed, err)
 	}
 	return GetWorkspaceResult{Workspace: model, Owner: owner.Normalize(), Found: true}, nil
+}
+
+func (s *WorkspaceService) SetWorkspaceFavorite(ctx context.Context, input workspace.FavoriteInput) error {
+	input = input.Normalize()
+	if err := input.Validate(); err != nil {
+		return err
+	}
+
+	_, found, err := s.repository.Get(ctx, workspace.GetQuery{ID: input.WorkspaceID})
+	if err != nil {
+		return fmt.Errorf("get workspace for favorite: %w", err)
+	}
+	if !found {
+		return workspace.ErrNotFound
+	}
+
+	if !input.Favorite {
+		if err := s.repository.DeleteFavorite(ctx, input); err != nil {
+			return fmt.Errorf("delete workspace favorite: %w", err)
+		}
+		return nil
+	}
+
+	now := s.clock().UTC()
+	favorite := workspace.UserFavoriteWorkspace{
+		ID:          s.idGenerator(),
+		NTAccount:   input.NTAccount,
+		WorkspaceID: input.WorkspaceID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.repository.UpsertFavorite(ctx, favorite); err != nil {
+		return fmt.Errorf("upsert workspace favorite: %w", err)
+	}
+	return nil
 }
 
 func (s *WorkspaceService) publishResourceCreateCommands(ctx context.Context, workspaceID string, input workspace.CreateInput) {
