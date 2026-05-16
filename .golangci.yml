@@ -46,7 +46,7 @@ linters:
             - "**/internal/domain/*.go"
             - "**/internal/domain/**/*.go"
           deny:
-            - pkg: net/http$
+            - pkg: net/http
               desc: domain packages must not depend on HTTP transport/client APIs
             - pkg: github.com/cloudevents/sdk-go
               desc: domain packages must not depend on event transport envelopes
@@ -100,7 +100,7 @@ linters:
             - "**/internal/*/services/*.go"
             - "**/internal/*/services/**/*.go"
           deny:
-            - pkg: net/http$
+            - pkg: net/http
               desc: services must not depend on HTTP transport/client APIs
             - pkg: github.com/cloudevents/sdk-go
               desc: services must not depend on event transport envelopes
