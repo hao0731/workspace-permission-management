@@ -208,7 +208,7 @@ services:
       - go_mod_cache:/go/pkg/mod
     environment:
       GROUP_EXPIRY_SCHEDULER_ENV: development
-      GROUP_EXPIRY_SCHEDULER_HTTP_ADDR: :8084
+      GROUP_EXPIRY_SCHEDULER_HTTP_ADDR: :8085
       GROUP_EXPIRY_SCHEDULER_MONGODB_URI: mongodb://mongodb:27017/?replicaSet=rs0
       GROUP_EXPIRY_SCHEDULER_MONGODB_DATABASE: workspace_permission_management
       GROUP_EXPIRY_SCHEDULER_NATS_URL: nats://nats:4222
@@ -218,7 +218,7 @@ services:
       GROUP_EXPIRY_SCHEDULER_GROUP_EXPIRY_BUCKET_TIMEZONE: ${GROUP_EXPIRY_SCHEDULER_GROUP_EXPIRY_BUCKET_TIMEZONE:-UTC}
       GROUP_EXPIRY_SCHEDULER_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE: ${GROUP_EXPIRY_SCHEDULER_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE:-UTC}
     ports:
-      - "8084:8084"
+      - "8085:8085"
     depends_on:
       mongo-init:
         condition: service_completed_successfully
