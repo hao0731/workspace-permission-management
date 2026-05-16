@@ -40,7 +40,7 @@ Policy alignment:
 
 ## Non-Goals
 
-- Do not design the scheduler or dispatcher that scans `individual_member_expiry_task` and publishes command events.
+- Do not design the scheduler or dispatcher in this command-focused document. The scheduler is documented separately in [Group Expiry Scheduler Design](group-expiry-scheduler.md).
 - Do not expose `expired_at` in public HTTP member or group responses in this phase.
 - Do not publish membership-changed events.
 - Do not evaluate permissions or dynamic grouping rules.

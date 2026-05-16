@@ -10,6 +10,7 @@ This document is the entry point for `group-service`. Endpoint-family details ar
 - [Group Individual Members API Design](group-service-individual-members.md): individual member collection schema, paginated member reads, and individual member mutations.
 - [Group Expiry Command Design](group-service-group-expiry-command.md): grouping-rule expiry tasks, JetStream command contract, and idempotent command handling.
 - [Group Individual Member Expiry Command Design](group-service-individual-member-expiry-command.md): individual-member expiry tasks, JetStream command contract, and idempotent command handling.
+- [Group Expiry Scheduler Design](group-expiry-scheduler.md): independent scheduler service that scans expiry task collections and publishes the existing expiry command events.
 
 Related context:
 
@@ -42,6 +43,7 @@ Policy alignment:
 - Persist explicit individual members in MongoDB collection `group_individual_members`.
 - Persist grouping-rule expiration tasks in MongoDB collection `group_expiry_task`.
 - Persist individual-member expiration tasks in MongoDB collection `individual_member_expiry_task`.
+- Share expiry task collection schema, indexes, and query helpers through `internal/shared/repositories/expiry`.
 - Use soft deletion through `deleted_at` for both groups and individual members.
 - Keep create and delete operations that touch both collections atomic through MongoDB transactions.
 - Keep individual member add, expiration update, and delete workflows scoped to an active group and atomic through MongoDB transactions.
@@ -111,6 +113,8 @@ Alternatives considered:
 - `group_individual_members`: explicit members assigned to groups, member expiration, timestamps, and member soft-delete state. Details are in [Group Individual Members API Design](group-service-individual-members.md#group_individual_members-collection).
 - `group_expiry_task`: the active outbox-like expiry task for each group that currently has dynamic grouping rules. Details are in [Group Expiry Command Design](group-service-group-expiry-command.md#group_expiry_task-collection).
 - `individual_member_expiry_task`: the active outbox-like expiry task for each active individual member. Details are in [Group Individual Member Expiry Command Design](group-service-individual-member-expiry-command.md#individual_member_expiry_task-collection).
+
+The expiry task collection schema, indexes, and task-specific query helpers are shared with `group-expiry-scheduler` through `internal/shared/repositories/expiry`. `group-service` still owns group and member write transactions and calls the shared expiry repository inside those transactions.
 
 Soft-delete rules:
 
