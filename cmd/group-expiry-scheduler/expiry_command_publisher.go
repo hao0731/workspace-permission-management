@@ -68,7 +68,12 @@ func newExpiryCommandPublisher(publisher messagePublisher, groupSubject string, 
 }
 
 func (p expiryCommandPublisher) PublishGroupExpiryCommand(ctx context.Context, task expiry.GroupTask) error {
-	data, err := transport.NewGroupExpiryCommandEvent(task, p.groupSubject, p.idGenerator(), p.now().UTC())
+	data, err := transport.NewGroupExpiryCommandEvent(transport.GroupExpiryCommand{
+		TaskID:           task.ID,
+		WorkspaceID:      task.WorkspaceID,
+		GroupID:          task.GroupID,
+		ExpirationBucket: task.ExpirationBucket,
+	}, p.groupSubject, p.idGenerator(), p.now().UTC())
 	if err != nil {
 		return fmt.Errorf("build group expiry command event: %w", err)
 	}
@@ -79,7 +84,12 @@ func (p expiryCommandPublisher) PublishGroupExpiryCommand(ctx context.Context, t
 }
 
 func (p expiryCommandPublisher) PublishIndividualMemberExpiryCommand(ctx context.Context, task expiry.IndividualMemberTask) error {
-	data, err := transport.NewIndividualMemberExpiryCommandEvent(task, p.individualMemberSubject, p.idGenerator(), p.now().UTC())
+	data, err := transport.NewIndividualMemberExpiryCommandEvent(transport.IndividualMemberExpiryCommand{
+		TaskID:           task.ID,
+		GroupID:          task.GroupID,
+		NTAccount:        task.NTAccount,
+		ExpirationBucket: task.ExpirationBucket,
+	}, p.individualMemberSubject, p.idGenerator(), p.now().UTC())
 	if err != nil {
 		return fmt.Errorf("build individual member expiry command event: %w", err)
 	}

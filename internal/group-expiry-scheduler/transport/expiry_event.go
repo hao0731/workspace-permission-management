@@ -6,47 +6,35 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-
-	"github.com/hao0731/workspace-permission-management/internal/shared/repositories/expiry"
 )
 
 const eventSource = "group-expiry-scheduler"
 
-type groupExpiryCommandData struct {
+type GroupExpiryCommand struct {
 	TaskID           string `json:"task_id"`
 	WorkspaceID      string `json:"workspace_id"`
 	GroupID          string `json:"group_id"`
 	ExpirationBucket string `json:"expiration_bucket"`
 }
 
-type individualMemberExpiryCommandData struct {
+type IndividualMemberExpiryCommand struct {
 	TaskID           string `json:"task_id"`
 	GroupID          string `json:"group_id"`
 	NTAccount        string `json:"nt_account"`
 	ExpirationBucket string `json:"expiration_bucket"`
 }
 
-func NewGroupExpiryCommandEvent(task expiry.GroupTask, eventType string, eventID string, eventTime time.Time) ([]byte, error) {
-	event := newCommandEvent(task.ID, eventType, eventID, eventTime)
-	if err := event.SetData(cloudevents.ApplicationJSON, groupExpiryCommandData{
-		TaskID:           task.ID,
-		WorkspaceID:      task.WorkspaceID,
-		GroupID:          task.GroupID,
-		ExpirationBucket: task.ExpirationBucket,
-	}); err != nil {
+func NewGroupExpiryCommandEvent(command GroupExpiryCommand, eventType string, eventID string, eventTime time.Time) ([]byte, error) {
+	event := newCommandEvent(command.TaskID, eventType, eventID, eventTime)
+	if err := event.SetData(cloudevents.ApplicationJSON, command); err != nil {
 		return nil, fmt.Errorf("set group expiry command data: %w", err)
 	}
 	return marshalEvent(event)
 }
 
-func NewIndividualMemberExpiryCommandEvent(task expiry.IndividualMemberTask, eventType string, eventID string, eventTime time.Time) ([]byte, error) {
-	event := newCommandEvent(task.ID, eventType, eventID, eventTime)
-	if err := event.SetData(cloudevents.ApplicationJSON, individualMemberExpiryCommandData{
-		TaskID:           task.ID,
-		GroupID:          task.GroupID,
-		NTAccount:        task.NTAccount,
-		ExpirationBucket: task.ExpirationBucket,
-	}); err != nil {
+func NewIndividualMemberExpiryCommandEvent(command IndividualMemberExpiryCommand, eventType string, eventID string, eventTime time.Time) ([]byte, error) {
+	event := newCommandEvent(command.TaskID, eventType, eventID, eventTime)
+	if err := event.SetData(cloudevents.ApplicationJSON, command); err != nil {
 		return nil, fmt.Errorf("set individual member expiry command data: %w", err)
 	}
 	return marshalEvent(event)
