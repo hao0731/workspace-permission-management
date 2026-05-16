@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	sharedexpiry "github.com/hao0731/workspace-permission-management/internal/shared/repositories/expiry"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/event"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -131,7 +132,7 @@ func TestNewIndividualMemberDocumentsIncludesExpiredAtAndTask(t *testing.T) {
 		t.Fatalf("ExpiredAt = %v, want %s", docs[0].ExpiredAt, expiredAt)
 	}
 
-	taskDocs := newIndividualMemberExpiryTaskDocuments(model.IndividualMembers)
+	taskDocs := newSharedIndividualMemberTasks(model.IndividualMembers)
 	if len(taskDocs) != 1 {
 		t.Fatalf("task docs len = %d, want 1", len(taskDocs))
 	}
@@ -140,33 +141,33 @@ func TestNewIndividualMemberDocumentsIncludesExpiredAtAndTask(t *testing.T) {
 	}
 }
 
-func TestNewExpiryTaskDocument(t *testing.T) {
+func TestNewSharedGroupTask(t *testing.T) {
 	t.Parallel()
 
-	doc := newExpiryTaskDocument(group.ExpiryTask{
+	task := newSharedGroupTask(group.ExpiryTask{
 		ID:               "task-1",
 		WorkspaceID:      "workspace-1",
 		GroupID:          "group-1",
 		ExpirationBucket: "2026-05-10",
 	})
 
-	if doc.ID != "task-1" || doc.WorkspaceID != "workspace-1" || doc.GroupID != "group-1" || doc.ExpirationBucket != "2026-05-10" {
-		t.Fatalf("doc = %+v", doc)
+	if task.ID != "task-1" || task.WorkspaceID != "workspace-1" || task.GroupID != "group-1" || task.ExpirationBucket != "2026-05-10" {
+		t.Fatalf("task = %+v", task)
 	}
 }
 
-func TestNewIndividualMemberExpiryTaskDocument(t *testing.T) {
+func TestNewSharedIndividualMemberTask(t *testing.T) {
 	t.Parallel()
 
-	doc := newIndividualMemberExpiryTaskDocument(group.IndividualMemberExpiryTask{
+	task := newSharedIndividualMemberTask(group.IndividualMemberExpiryTask{
 		ID:               "member-task-1",
 		GroupID:          "group-1",
 		NTAccount:        "user1",
 		ExpirationBucket: "2026-05-10",
 	})
 
-	if doc.ID != "member-task-1" || doc.GroupID != "group-1" || doc.NTAccount != "user1" || doc.ExpirationBucket != "2026-05-10" {
-		t.Fatalf("doc = %+v", doc)
+	if task.ID != "member-task-1" || task.GroupID != "group-1" || task.NTAccount != "user1" || task.ExpirationBucket != "2026-05-10" {
+		t.Fatalf("task = %+v", task)
 	}
 }
 
@@ -190,30 +191,6 @@ func TestIndexModels(t *testing.T) {
 	memberUniqueOptions := indexOptions(t, memberIndexes[0])
 	if *memberUniqueOptions.Name != membersActiveGroupAccountUniqueIndexName {
 		t.Fatalf("member unique index name = %q, want %q", *memberUniqueOptions.Name, membersActiveGroupAccountUniqueIndexName)
-	}
-
-	expiryTaskIndexes := groupExpiryTaskIndexModels()
-	if len(expiryTaskIndexes) != 2 {
-		t.Fatalf("expiry task indexes len = %d, want 2", len(expiryTaskIndexes))
-	}
-	expiryTaskUniqueOptions := indexOptions(t, expiryTaskIndexes[0])
-	if *expiryTaskUniqueOptions.Name != expiryTasksActiveGroupUniqueIndexName {
-		t.Fatalf("expiry task unique index name = %q, want %q", *expiryTaskUniqueOptions.Name, expiryTasksActiveGroupUniqueIndexName)
-	}
-	if expiryTaskUniqueOptions.Unique == nil || !*expiryTaskUniqueOptions.Unique {
-		t.Fatal("expiry task unique index Unique = false, want true")
-	}
-
-	memberExpiryTaskIndexes := individualMemberExpiryTaskIndexModels()
-	if len(memberExpiryTaskIndexes) != 2 {
-		t.Fatalf("individual member expiry task indexes len = %d, want 2", len(memberExpiryTaskIndexes))
-	}
-	memberExpiryTaskUniqueOptions := indexOptions(t, memberExpiryTaskIndexes[0])
-	if *memberExpiryTaskUniqueOptions.Name != individualMemberExpiryTasksActiveMemberUniqueIndexName {
-		t.Fatalf("individual member expiry task unique index name = %q, want %q", *memberExpiryTaskUniqueOptions.Name, individualMemberExpiryTasksActiveMemberUniqueIndexName)
-	}
-	if memberExpiryTaskUniqueOptions.Unique == nil || !*memberExpiryTaskUniqueOptions.Unique {
-		t.Fatal("individual member expiry task unique index Unique = false, want true")
 	}
 }
 
@@ -631,8 +608,10 @@ func TestMongoGroupRepositoryCreateWritesExpiryTaskIntegration(t *testing.T) {
 		t.Fatalf("Create error = %v, want nil", err)
 	}
 
-	var task expiryTaskDocument
-	err := db.Collection(groupExpiryTaskCollectionName).FindOne(context.Background(), bson.M{"_id": "task-1"}).Decode(&task)
+	var task struct {
+		ExpirationBucket string `bson:"expiration_bucket"`
+	}
+	err := db.Collection(sharedexpiry.GroupTaskCollectionName).FindOne(context.Background(), bson.M{"_id": "task-1"}).Decode(&task)
 	if err != nil {
 		t.Fatalf("find expiry task: %v", err)
 	}
@@ -659,8 +638,12 @@ func TestMongoGroupRepositoryCreateWritesIndividualMemberExpiryTasksIntegration(
 		t.Fatalf("Create error = %v, want nil", err)
 	}
 
-	var task individualMemberExpiryTaskDocument
-	err := db.Collection(individualMemberExpiryTaskCollectionName).FindOne(context.Background(), bson.M{"_id": "member-task-1"}).Decode(&task)
+	var task struct {
+		GroupID          string `bson:"group_id"`
+		NTAccount        string `bson:"nt_account"`
+		ExpirationBucket string `bson:"expiration_bucket"`
+	}
+	err := db.Collection(sharedexpiry.IndividualMemberTaskCollectionName).FindOne(context.Background(), bson.M{"_id": "member-task-1"}).Decode(&task)
 	if err != nil {
 		t.Fatalf("find individual member expiry task: %v", err)
 	}
@@ -681,7 +664,7 @@ func TestMongoGroupRepositoryCreateWithoutExpiryTaskIntegration(t *testing.T) {
 	if _, err := repository.Create(context.Background(), model); err != nil {
 		t.Fatalf("Create error = %v, want nil", err)
 	}
-	count, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
+	count, err := db.Collection(sharedexpiry.GroupTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
 	if err != nil {
 		t.Fatalf("count expiry tasks: %v", err)
 	}
@@ -799,15 +782,13 @@ func TestMongoGroupRepositoryDeleteIntegration(t *testing.T) {
 	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
 		t.Fatalf("Create error = %v, want nil", err)
 	}
-	if _, err := db.Collection(groupExpiryTaskCollectionName).InsertOne(context.Background(), expiryTaskDocument{
+	insertExpiryTask(t, repository, sharedexpiry.GroupTask{
 		ID:               "task-1",
 		WorkspaceID:      "workspace-1",
 		GroupID:          "group-1",
 		ExpirationBucket: "2026-06-01",
-	}); err != nil {
-		t.Fatalf("insert expiry task: %v", err)
-	}
-	insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+	})
+	insertIndividualMemberExpiryTask(t, repository, sharedexpiry.IndividualMemberTask{
 		ID:               "member-task-1",
 		GroupID:          "group-1",
 		NTAccount:        "user1",
@@ -833,14 +814,14 @@ func TestMongoGroupRepositoryDeleteIntegration(t *testing.T) {
 	if memberCount != 1 {
 		t.Fatalf("deleted member count = %d, want 1", memberCount)
 	}
-	taskCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
+	taskCount, err := db.Collection(sharedexpiry.GroupTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
 	if err != nil {
 		t.Fatalf("count expiry tasks: %v", err)
 	}
 	if taskCount != 0 {
 		t.Fatalf("expiry task count = %d, want 0", taskCount)
 	}
-	memberTaskCount, err := db.Collection(individualMemberExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
+	memberTaskCount, err := db.Collection(sharedexpiry.IndividualMemberTaskCollectionName).CountDocuments(context.Background(), bson.M{"group_id": "group-1"})
 	if err != nil {
 		t.Fatalf("count individual member expiry tasks: %v", err)
 	}
@@ -858,14 +839,12 @@ func TestMongoGroupRepositoryUpdateGroupingRuleIntegration(t *testing.T) {
 	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
 		t.Fatalf("Create error = %v, want nil", err)
 	}
-	if _, err := db.Collection(groupExpiryTaskCollectionName).InsertOne(context.Background(), expiryTaskDocument{
+	insertExpiryTask(t, repository, sharedexpiry.GroupTask{
 		ID:               "task-old",
 		WorkspaceID:      "workspace-1",
 		GroupID:          "group-1",
 		ExpirationBucket: "2026-06-01",
-	}); err != nil {
-		t.Fatalf("insert expiry task: %v", err)
-	}
+	})
 
 	expiration := repositoryTime().Add(48 * time.Hour)
 	err := repository.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
@@ -896,14 +875,14 @@ func TestMongoGroupRepositoryUpdateGroupingRuleIntegration(t *testing.T) {
 	if len(got.GroupingRule.Rules) != 1 || got.GroupingRule.Rules[0].AttributeKey != "level" {
 		t.Fatalf("rules = %+v, want level rule", got.GroupingRule.Rules)
 	}
-	oldCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-old"})
+	oldCount, err := db.Collection(sharedexpiry.GroupTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-old"})
 	if err != nil {
 		t.Fatalf("count old expiry tasks: %v", err)
 	}
 	if oldCount != 0 {
 		t.Fatalf("old expiry task count = %d, want 0", oldCount)
 	}
-	newCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-new"})
+	newCount, err := db.Collection(sharedexpiry.GroupTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-new"})
 	if err != nil {
 		t.Fatalf("count new expiry tasks: %v", err)
 	}
@@ -968,14 +947,12 @@ func TestMongoGroupRepositoryUpdateGroupingRuleWithoutRulesDeletesExpiryTaskInte
 	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
 		t.Fatalf("Create error = %v, want nil", err)
 	}
-	if _, err := db.Collection(groupExpiryTaskCollectionName).InsertOne(context.Background(), expiryTaskDocument{
+	insertExpiryTask(t, repository, sharedexpiry.GroupTask{
 		ID:               "task-old",
 		WorkspaceID:      "workspace-1",
 		GroupID:          "group-1",
 		ExpirationBucket: "2026-06-01",
-	}); err != nil {
-		t.Fatalf("insert expiry task: %v", err)
-	}
+	})
 
 	err := repository.UpdateGroupingRule(context.Background(), group.UpdateGroupingRuleInput{
 		WorkspaceID:    "workspace-1",
@@ -986,7 +963,7 @@ func TestMongoGroupRepositoryUpdateGroupingRuleWithoutRulesDeletesExpiryTaskInte
 	if err != nil {
 		t.Fatalf("UpdateGroupingRule error = %v, want nil", err)
 	}
-	count, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-old"})
+	count, err := db.Collection(sharedexpiry.GroupTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "task-old"})
 	if err != nil {
 		t.Fatalf("count expiry tasks: %v", err)
 	}
@@ -1014,7 +991,7 @@ func TestMongoGroupRepositoryExpireGroupingRuleExpiresAndDeletesTaskIntegration(
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
-	}, expiryTaskDocument{
+	}, sharedexpiry.GroupTask{
 		ID:               "task-1",
 		WorkspaceID:      "workspace-1",
 		GroupID:          "group-1",
@@ -1046,7 +1023,7 @@ func TestMongoGroupRepositoryExpireGroupingRuleExpiresAndDeletesTaskIntegration(
 	if doc.GroupingRule.ExpiredAt == nil || !doc.GroupingRule.ExpiredAt.Equal(now.Add(time.Hour)) {
 		t.Fatalf("expired_at = %v, want %s", doc.GroupingRule.ExpiredAt, now.Add(time.Hour))
 	}
-	taskCount, err := db.Collection(groupExpiryTaskCollectionName).CountDocuments(ctx, bson.M{"_id": "task-1"})
+	taskCount, err := db.Collection(sharedexpiry.GroupTaskCollectionName).CountDocuments(ctx, bson.M{"_id": "task-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1070,7 +1047,7 @@ func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.
 		{
 			name: "missing group deletes task",
 			setup: func(t *testing.T, repository *MongoGroupRepository) {
-				insertExpiryTask(t, repository, expiryTaskDocument{
+				insertExpiryTask(t, repository, sharedexpiry.GroupTask{
 					ID:               "task-1",
 					WorkspaceID:      "workspace-1",
 					GroupID:          "group-1",
@@ -1099,7 +1076,7 @@ func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.
 					},
 					CreatedAt: now,
 					UpdatedAt: now,
-				}, expiryTaskDocument{
+				}, sharedexpiry.GroupTask{
 					ID:               "task-1",
 					WorkspaceID:      "workspace-1",
 					GroupID:          "group-1",
@@ -1127,7 +1104,7 @@ func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.
 					},
 					CreatedAt: now,
 					UpdatedAt: now,
-				}, expiryTaskDocument{
+				}, sharedexpiry.GroupTask{
 					ID:               "task-1",
 					WorkspaceID:      "workspace-1",
 					GroupID:          "group-1",
@@ -1150,7 +1127,7 @@ func TestMongoGroupRepositoryExpireGroupingRuleStaleCasesIntegration(t *testing.
 			return repository.ExpireGroupingRule(ctx, command, expiredAt, location)
 		},
 		func(ctx context.Context, repository *MongoGroupRepository, command group.ExpireGroupingRuleCommand) (int64, error) {
-			return repository.expiryTasks.CountDocuments(ctx, bson.M{"_id": command.TaskID})
+			return repository.groups.Database().Collection(sharedexpiry.GroupTaskCollectionName).CountDocuments(ctx, bson.M{"_id": command.TaskID})
 		},
 	)
 }
@@ -1186,7 +1163,7 @@ func TestMongoGroupRepositoryExpireIndividualMemberExpiresAndDeletesTaskIntegrat
 	}); err != nil {
 		t.Fatalf("Create error = %v", err)
 	}
-	insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+	insertIndividualMemberExpiryTask(t, repository, sharedexpiry.IndividualMemberTask{
 		ID:               "member-task-1",
 		GroupID:          "group-1",
 		NTAccount:        "user1",
@@ -1218,7 +1195,7 @@ func TestMongoGroupRepositoryExpireIndividualMemberExpiresAndDeletesTaskIntegrat
 	if doc.ExpiredAt == nil || !doc.ExpiredAt.Equal(now.Add(time.Hour)) {
 		t.Fatalf("expired_at = %v, want %s", doc.ExpiredAt, now.Add(time.Hour))
 	}
-	taskCount, err := db.Collection(individualMemberExpiryTaskCollectionName).CountDocuments(ctx, bson.M{"_id": "member-task-1"})
+	taskCount, err := db.Collection(sharedexpiry.IndividualMemberTaskCollectionName).CountDocuments(ctx, bson.M{"_id": "member-task-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1242,7 +1219,7 @@ func TestMongoGroupRepositoryExpireIndividualMemberStaleCasesIntegration(t *test
 		{
 			name: "missing member deletes task",
 			setup: func(t *testing.T, repository *MongoGroupRepository) {
-				insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+				insertIndividualMemberExpiryTask(t, repository, sharedexpiry.IndividualMemberTask{
 					ID:               "member-task-1",
 					GroupID:          "group-1",
 					NTAccount:        "user1",
@@ -1279,7 +1256,7 @@ func TestMongoGroupRepositoryExpireIndividualMemberStaleCasesIntegration(t *test
 					CreatedAt:      now,
 					UpdatedAt:      now,
 				})
-				insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+				insertIndividualMemberExpiryTask(t, repository, sharedexpiry.IndividualMemberTask{
 					ID:               "member-task-1",
 					GroupID:          "group-1",
 					NTAccount:        "user1",
@@ -1314,7 +1291,7 @@ func TestMongoGroupRepositoryExpireIndividualMemberStaleCasesIntegration(t *test
 					CreatedAt:      now,
 					UpdatedAt:      now,
 				})
-				insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+				insertIndividualMemberExpiryTask(t, repository, sharedexpiry.IndividualMemberTask{
 					ID:               "member-task-1",
 					GroupID:          "group-1",
 					NTAccount:        "user1",
@@ -1337,7 +1314,7 @@ func TestMongoGroupRepositoryExpireIndividualMemberStaleCasesIntegration(t *test
 			return repository.ExpireIndividualMember(ctx, command, expiredAt, location)
 		},
 		func(ctx context.Context, repository *MongoGroupRepository, command group.ExpireIndividualMemberCommand) (int64, error) {
-			return repository.memberExpiryTasks.CountDocuments(ctx, bson.M{"_id": command.TaskID})
+			return repository.groups.Database().Collection(sharedexpiry.IndividualMemberTaskCollectionName).CountDocuments(ctx, bson.M{"_id": command.TaskID})
 		},
 	)
 }
@@ -1393,7 +1370,7 @@ func runRepositoryExpiryStaleCases[C any, S comparable](
 	}
 }
 
-func insertGroupWithTask(t *testing.T, repository *MongoGroupRepository, groupDoc groupDocument, taskDoc expiryTaskDocument) {
+func insertGroupWithTask(t *testing.T, repository *MongoGroupRepository, groupDoc groupDocument, taskDoc sharedexpiry.GroupTask) {
 	t.Helper()
 	if _, err := repository.groups.InsertOne(context.Background(), groupDoc); err != nil {
 		t.Fatal(err)
@@ -1411,16 +1388,16 @@ func insertGroupWithMember(t *testing.T, repository *MongoGroupRepository, group
 	}
 }
 
-func insertExpiryTask(t *testing.T, repository *MongoGroupRepository, taskDoc expiryTaskDocument) {
+func insertExpiryTask(t *testing.T, repository *MongoGroupRepository, taskDoc sharedexpiry.GroupTask) {
 	t.Helper()
-	if _, err := repository.expiryTasks.InsertOne(context.Background(), taskDoc); err != nil {
+	if err := repository.expiryRepository.InsertGroupTask(context.Background(), taskDoc); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func insertIndividualMemberExpiryTask(t *testing.T, repository *MongoGroupRepository, taskDoc individualMemberExpiryTaskDocument) {
+func insertIndividualMemberExpiryTask(t *testing.T, repository *MongoGroupRepository, taskDoc sharedexpiry.IndividualMemberTask) {
 	t.Helper()
-	if _, err := repository.memberExpiryTasks.InsertOne(context.Background(), taskDoc); err != nil {
+	if err := repository.expiryRepository.InsertIndividualMemberTasks(context.Background(), []sharedexpiry.IndividualMemberTask{taskDoc}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1530,7 +1507,7 @@ func TestMongoGroupRepositoryAddIndividualMembersWritesExpiryTaskIntegration(t *
 		t.Fatalf("AddIndividualMembers error = %v, want nil", err)
 	}
 
-	count, err := db.Collection(individualMemberExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-2"})
+	count, err := db.Collection(sharedexpiry.IndividualMemberTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-2"})
 	if err != nil {
 		t.Fatalf("count individual member expiry tasks: %v", err)
 	}
@@ -1637,7 +1614,7 @@ func TestMongoGroupRepositoryUpdateIndividualMemberExpirationReplacesExpiryTaskI
 	); err != nil {
 		t.Fatalf("seed expired_at: %v", err)
 	}
-	insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+	insertIndividualMemberExpiryTask(t, repository, sharedexpiry.IndividualMemberTask{
 		ID:               "member-task-old",
 		GroupID:          "group-1",
 		NTAccount:        "user1",
@@ -1670,11 +1647,11 @@ func TestMongoGroupRepositoryUpdateIndividualMemberExpirationReplacesExpiryTaskI
 	if doc.ExpiredAt != nil {
 		t.Fatalf("ExpiredAt = %v, want nil", doc.ExpiredAt)
 	}
-	oldCount, err := db.Collection(individualMemberExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-old"})
+	oldCount, err := db.Collection(sharedexpiry.IndividualMemberTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-old"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	newCount, err := db.Collection(individualMemberExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-new"})
+	newCount, err := db.Collection(sharedexpiry.IndividualMemberTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-new"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1741,7 +1718,7 @@ func TestMongoGroupRepositoryDeleteIndividualMemberDeletesExpiryTaskIntegration(
 	if _, err := repository.Create(context.Background(), repositoryGroup()); err != nil {
 		t.Fatalf("Create error = %v, want nil", err)
 	}
-	insertIndividualMemberExpiryTask(t, repository, individualMemberExpiryTaskDocument{
+	insertIndividualMemberExpiryTask(t, repository, sharedexpiry.IndividualMemberTask{
 		ID:               "member-task-1",
 		GroupID:          "group-1",
 		NTAccount:        "user1",
@@ -1756,7 +1733,7 @@ func TestMongoGroupRepositoryDeleteIndividualMemberDeletesExpiryTaskIntegration(
 	if err != nil {
 		t.Fatalf("DeleteIndividualMember error = %v, want nil", err)
 	}
-	count, err := db.Collection(individualMemberExpiryTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-1"})
+	count, err := db.Collection(sharedexpiry.IndividualMemberTaskCollectionName).CountDocuments(context.Background(), bson.M{"_id": "member-task-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
