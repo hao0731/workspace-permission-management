@@ -198,6 +198,35 @@ services:
     networks:
       - workspace_permission_management
 
+  group-expiry-scheduler:
+    image: golang:1.25
+    container_name: workspace-permission-management-group-expiry-scheduler
+    working_dir: /workspace
+    command: ["go", "run", "./cmd/group-expiry-scheduler"]
+    volumes:
+      - .:/workspace
+      - go_mod_cache:/go/pkg/mod
+    environment:
+      GROUP_EXPIRY_SCHEDULER_ENV: development
+      GROUP_EXPIRY_SCHEDULER_HTTP_ADDR: :8084
+      GROUP_EXPIRY_SCHEDULER_MONGODB_URI: mongodb://mongodb:27017/?replicaSet=rs0
+      GROUP_EXPIRY_SCHEDULER_MONGODB_DATABASE: workspace_permission_management
+      GROUP_EXPIRY_SCHEDULER_NATS_URL: nats://nats:4222
+      GROUP_EXPIRY_SCHEDULER_GROUP_EXPIRY_COMMAND_SUBJECT: ${GROUP_EXPIRY_SCHEDULER_GROUP_EXPIRY_COMMAND_SUBJECT:-app.todo.group.expiry.process}
+      GROUP_EXPIRY_SCHEDULER_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT: ${GROUP_EXPIRY_SCHEDULER_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT:-app.todo.group.individual-member.expiry.process}
+      GROUP_EXPIRY_SCHEDULER_CRON_EXPRESSION: "${GROUP_EXPIRY_SCHEDULER_CRON_EXPRESSION:-* * * * *}"
+      GROUP_EXPIRY_SCHEDULER_GROUP_EXPIRY_BUCKET_TIMEZONE: ${GROUP_EXPIRY_SCHEDULER_GROUP_EXPIRY_BUCKET_TIMEZONE:-UTC}
+      GROUP_EXPIRY_SCHEDULER_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE: ${GROUP_EXPIRY_SCHEDULER_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE:-UTC}
+    ports:
+      - "8084:8084"
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      nats-init:
+        condition: service_completed_successfully
+    networks:
+      - workspace_permission_management
+
 networks:
   workspace_permission_management:
     name: workspace_permission_management
@@ -205,3 +234,4 @@ networks:
 volumes:
   mongodb_data:
   nats_data:
+  go_mod_cache:
