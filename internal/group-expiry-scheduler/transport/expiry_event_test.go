@@ -6,13 +6,11 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-
-	"github.com/hao0731/workspace-permission-management/internal/shared/repositories/expiry"
 )
 
 func TestNewGroupExpiryCommandEvent(t *testing.T) {
-	data, err := NewGroupExpiryCommandEvent(expiry.GroupTask{
-		ID:               "task-1",
+	data, err := NewGroupExpiryCommandEvent(GroupExpiryCommand{
+		TaskID:           "task-1",
 		WorkspaceID:      "workspace-1",
 		GroupID:          "group-1",
 		ExpirationBucket: "2026-05-16",
@@ -21,7 +19,7 @@ func TestNewGroupExpiryCommandEvent(t *testing.T) {
 		t.Fatalf("NewGroupExpiryCommandEvent error = %v, want nil", err)
 	}
 	event := parseAndAssertEvent(t, data, "app.todo.group.expiry.process")
-	var payload groupExpiryCommandData
+	var payload GroupExpiryCommand
 	if err := event.DataAs(&payload); err != nil {
 		t.Fatalf("DataAs error = %v", err)
 	}
@@ -31,8 +29,8 @@ func TestNewGroupExpiryCommandEvent(t *testing.T) {
 }
 
 func TestNewIndividualMemberExpiryCommandEvent(t *testing.T) {
-	data, err := NewIndividualMemberExpiryCommandEvent(expiry.IndividualMemberTask{
-		ID:               "task-1",
+	data, err := NewIndividualMemberExpiryCommandEvent(IndividualMemberExpiryCommand{
+		TaskID:           "task-1",
 		GroupID:          "group-1",
 		NTAccount:        "user1",
 		ExpirationBucket: "2026-05-16",
@@ -41,7 +39,7 @@ func TestNewIndividualMemberExpiryCommandEvent(t *testing.T) {
 		t.Fatalf("NewIndividualMemberExpiryCommandEvent error = %v, want nil", err)
 	}
 	event := parseAndAssertEvent(t, data, "app.todo.group.individual-member.expiry.process")
-	var payload individualMemberExpiryCommandData
+	var payload IndividualMemberExpiryCommand
 	if err := event.DataAs(&payload); err != nil {
 		t.Fatalf("DataAs error = %v", err)
 	}

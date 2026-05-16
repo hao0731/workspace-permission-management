@@ -33,10 +33,261 @@ linters:
     - copyloopvar        # Detects loop variable copy issues
 
     # Code organization
+    - depguard          # Enforces backend architecture import boundaries
     - grouper            # Analyzes expression groups
     - importas           # Enforces consistent import aliases
 
   settings:
+    depguard:
+      rules:
+        domain-layer:
+          list-mode: lax
+          files:
+            - "**/internal/domain/*.go"
+            - "**/internal/domain/**/*.go"
+          deny:
+            - pkg: net/http
+              desc: domain packages must not depend on HTTP transport/client APIs
+            - pkg: github.com/cloudevents/sdk-go
+              desc: domain packages must not depend on event transport envelopes
+            - pkg: github.com/labstack/echo
+              desc: domain packages must not depend on Echo
+            - pkg: github.com/nats-io/nats.go
+              desc: domain packages must not depend on NATS clients
+            - pkg: go.mongodb.org/mongo-driver
+              desc: domain packages must not depend on MongoDB drivers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service
+              desc: domain packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler
+              desc: domain packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service
+              desc: domain packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function
+              desc: domain packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr
+              desc: domain packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service
+              desc: domain packages must not depend on service-specific packages
+        shared-layer:
+          list-mode: lax
+          files:
+            - "**/internal/shared/*.go"
+            - "**/internal/shared/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service
+              desc: shared packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler
+              desc: shared packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service
+              desc: shared packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function
+              desc: shared packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr
+              desc: shared packages must not depend on service-specific packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service
+              desc: shared packages must not depend on service-specific packages
+        utils-layer:
+          list-mode: lax
+          files:
+            - "**/internal/utils/*.go"
+            - "**/internal/utils/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal
+              desc: utils packages must stay low-level and must not depend on internal packages
+        service-layer:
+          list-mode: lax
+          files:
+            - "**/internal/*/services/*.go"
+            - "**/internal/*/services/**/*.go"
+          deny:
+            - pkg: net/http
+              desc: services must not depend on HTTP transport/client APIs
+            - pkg: github.com/cloudevents/sdk-go
+              desc: services must not depend on event transport envelopes
+            - pkg: github.com/labstack/echo
+              desc: services must not depend on Echo
+            - pkg: github.com/nats-io/nats.go
+              desc: services must not depend on NATS clients
+            - pkg: go.mongodb.org/mongo-driver
+              desc: services must not depend on MongoDB drivers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/transport
+              desc: services must not depend on transport DTOs
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler/transport
+              desc: services must not depend on transport DTOs
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/transport
+              desc: services must not depend on transport DTOs
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function/transport
+              desc: services must not depend on transport DTOs
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr/transport
+              desc: services must not depend on transport DTOs
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/transport
+              desc: services must not depend on transport DTOs
+        handler-layer:
+          list-mode: lax
+          files:
+            - "**/internal/*/handlers/*.go"
+            - "**/internal/*/handlers/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/repositories
+              desc: handlers must call services instead of repositories directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/repositories
+              desc: handlers must call services instead of repositories directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/shared/repositories
+              desc: handlers must call services instead of repositories directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/repositories
+              desc: handlers must call services instead of repositories directly
+        transport-layer:
+          list-mode: lax
+          files:
+            - "**/internal/*/transport/*.go"
+            - "**/internal/*/transport/**/*.go"
+          deny:
+            - pkg: github.com/nats-io/nats.go
+              desc: transport DTO packages must not depend on broker clients
+            - pkg: go.mongodb.org/mongo-driver
+              desc: transport DTO packages must not depend on database drivers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/handlers
+              desc: transport packages must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/repositories
+              desc: transport packages must not depend on repositories
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/services
+              desc: transport packages must not depend on services
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/handlers
+              desc: transport packages must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/repositories
+              desc: transport packages must not depend on repositories
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/services
+              desc: transport packages must not depend on services
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function/handlers
+              desc: transport packages must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function/services
+              desc: transport packages must not depend on services
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr/handlers
+              desc: transport packages must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr/services
+              desc: transport packages must not depend on services
+            - pkg: github.com/hao0731/workspace-permission-management/internal/shared/repositories
+              desc: transport packages must not depend on repositories
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/handlers
+              desc: transport packages must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/repositories
+              desc: transport packages must not depend on repositories
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/services
+              desc: transport packages must not depend on services
+        repository-layer:
+          list-mode: lax
+          files:
+            - "**/internal/*/repositories/*.go"
+            - "**/internal/*/repositories/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/handlers
+              desc: repositories must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/services
+              desc: repositories must not depend on services
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service/transport
+              desc: repositories must not depend on transport packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/handlers
+              desc: repositories must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/services
+              desc: repositories must not depend on services
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service/transport
+              desc: repositories must not depend on transport packages
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/handlers
+              desc: repositories must not depend on handlers
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/services
+              desc: repositories must not depend on services
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service/transport
+              desc: repositories must not depend on transport packages
+        function-service-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/function-service/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service
+              desc: service packages must not import another service directly
+        group-expiry-scheduler-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/group-expiry-scheduler/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service
+              desc: service packages must not import another service directly
+        group-service-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/group-service/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service
+              desc: service packages must not import another service directly
+        mock-function-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/mock-function/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service
+              desc: service packages must not import another service directly
+        mock-hr-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/mock-hr/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/workspace-service
+              desc: service packages must not import another service directly
+        workspace-service-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/workspace-service/**/*.go"
+          deny:
+            - pkg: github.com/hao0731/workspace-permission-management/internal/function-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-expiry-scheduler
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/group-service
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-function
+              desc: service packages must not import another service directly
+            - pkg: github.com/hao0731/workspace-permission-management/internal/mock-hr
+              desc: service packages must not import another service directly
     dupl:
       threshold: 150
     errcheck:
@@ -50,6 +301,34 @@ linters:
       locale: US
     unparam:
       check-exported: false
+  exclusions:
+    paths:
+      - web/node_modules/
+    rules:
+      # Test files can be more relaxed
+      - path: _test\.go
+        linters:
+          - dupl
+          - errcheck
+          - unparam
+          - bodyclose
+
+      # Allow dot imports in test files (testify, etc.)
+      - path: _test\.go
+        text: "dot-imports"
+
+      # Generated code should be excluded
+      - path: "mocks/"
+        linters:
+          - dupl
+          - errcheck
+          - unparam
+          - unused
+
+      # Main function can have long functions
+      - path: cmd/
+        linters:
+          - dupl
 
 formatters:
   enable:
@@ -58,29 +337,3 @@ formatters:
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
-
-  exclude-rules:
-    # Test files can be more relaxed
-    - path: _test\.go
-      linters:
-        - dupl
-        - errcheck
-        - unparam
-        - bodyclose
-
-    # Allow dot imports in test files (testify, etc.)
-    - path: _test\.go
-      text: "dot-imports"
-
-    # Generated code should be excluded
-    - path: "mocks/"
-      linters:
-        - dupl
-        - errcheck
-        - unparam
-        - unused
-
-    # Main function can have long functions
-    - path: cmd/
-      linters:
-        - dupl
