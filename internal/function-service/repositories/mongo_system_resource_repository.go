@@ -101,20 +101,34 @@ func (r *MongoSystemResourceRepository) ListResourceDefinitions(ctx context.Cont
 }
 
 func (r *MongoSystemResourceRepository) UpsertResourceDefinitions(ctx context.Context, definitions []resource.ResourceDefinition) ([]resource.ResourceDefinition, error) {
-	saved := make([]resource.ResourceDefinition, 0, len(definitions))
-	for _, definition := range definitions {
-		doc := newSystemResourceDocument(definition)
-		filter := buildSystemResourceFilter(doc.SystemID, doc.Type, doc.Key)
-		if _, err := r.resourcesCollection.UpdateOne(ctx, filter, buildSystemResourceUpdate(doc), options.UpdateOne().SetUpsert(true)); err != nil {
-			return nil, fmt.Errorf("upsert system resource: %w", err)
-		}
-		var persisted systemResourceDocument
-		if err := r.resourcesCollection.FindOne(ctx, filter).Decode(&persisted); err != nil {
-			return nil, fmt.Errorf("find upserted system resource: %w", err)
-		}
-		saved = append(saved, persisted.toDomain())
+	if len(definitions) == 0 {
+		return []resource.ResourceDefinition{}, nil
 	}
-	return saved, nil
+	docs := make([]systemResourceDocument, 0, len(definitions))
+	for _, definition := range definitions {
+		docs = append(docs, newSystemResourceDocument(definition))
+	}
+	if _, err := r.resourcesCollection.BulkWrite(ctx, buildSystemResourceBulkWriteModels(docs)); err != nil {
+		return nil, fmt.Errorf("bulk upsert system resources: %w", err)
+	}
+
+	cursor, err := r.resourcesCollection.Find(ctx, buildSystemResourceReadbackFilter(definitions))
+	if err != nil {
+		return nil, fmt.Errorf("find upserted system resources: %w", err)
+	}
+	defer func() {
+		_ = cursor.Close(ctx)
+	}()
+
+	var persisted []systemResourceDocument
+	if decodeErr := cursor.All(ctx, &persisted); decodeErr != nil {
+		return nil, fmt.Errorf("decode upserted system resources: %w", decodeErr)
+	}
+	ordered, err := orderSystemResourceDefinitionsByRequest(definitions, persisted)
+	if err != nil {
+		return nil, err
+	}
+	return ordered, nil
 }
 
 func (r *MongoSystemResourceRepository) GetResourceAttributes(ctx context.Context, query resource.ResourceAttributesQuery) (resource.ResourceAttributes, bool, error) {
@@ -158,6 +172,26 @@ func buildSystemResourceFilter(systemID string, kind resource.ResourceDefinition
 	return bson.M{"system_id": systemID, "type": kind, "key": key}
 }
 
+func buildSystemResourceBulkWriteModels(docs []systemResourceDocument) []mongo.WriteModel {
+	models := make([]mongo.WriteModel, 0, len(docs))
+	for _, doc := range docs {
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(buildSystemResourceFilter(doc.SystemID, doc.Type, doc.Key)).
+			SetUpdate(buildSystemResourceUpdate(doc)).
+			SetUpsert(true),
+		)
+	}
+	return models
+}
+
+func buildSystemResourceReadbackFilter(definitions []resource.ResourceDefinition) bson.M {
+	filters := make(bson.A, 0, len(definitions))
+	for _, definition := range definitions {
+		filters = append(filters, buildSystemResourceFilter(definition.SystemID, definition.Type, definition.Key))
+	}
+	return bson.M{"$or": filters}
+}
+
 func buildSystemResourceUpdate(doc systemResourceDocument) bson.M {
 	set := bson.M{"label": doc.Label, "updated_at": doc.UpdatedAt}
 	update := bson.M{
@@ -176,6 +210,28 @@ func buildSystemResourceUpdate(doc systemResourceDocument) bson.M {
 		set["description"] = doc.Description
 	}
 	return update
+}
+
+func orderSystemResourceDefinitionsByRequest(requested []resource.ResourceDefinition, persisted []systemResourceDocument) ([]resource.ResourceDefinition, error) {
+	byIdentity := make(map[string]systemResourceDocument, len(persisted))
+	for _, doc := range persisted {
+		byIdentity[systemResourceDefinitionIdentity(doc.SystemID, doc.Type, doc.Key)] = doc
+	}
+
+	ordered := make([]resource.ResourceDefinition, 0, len(requested))
+	for _, definition := range requested {
+		identity := systemResourceDefinitionIdentity(definition.SystemID, definition.Type, definition.Key)
+		doc, ok := byIdentity[identity]
+		if !ok {
+			return nil, fmt.Errorf("upserted system resource not found: %s/%s/%s", definition.SystemID, definition.Type, definition.Key)
+		}
+		ordered = append(ordered, doc.toDomain())
+	}
+	return ordered, nil
+}
+
+func systemResourceDefinitionIdentity(systemID string, kind resource.ResourceDefinitionType, key string) string {
+	return systemID + "\x00" + string(kind) + "\x00" + key
 }
 
 func buildSystemResourceAttributesUpdate(doc systemResourceAttributesDocument) bson.M {
