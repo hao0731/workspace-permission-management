@@ -56,7 +56,13 @@ type ResourceDefinitionLimits struct {
 	Tags    int
 }
 
-type ResourceAttributes []ResourceAttribute
+type ResourceAttributes struct {
+	ID        string
+	SystemID  string
+	Values    []ResourceAttribute
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
 
 func (input ResourceDefinitionInput) Normalize() ResourceDefinitionInput {
 	input.Type = ResourceDefinitionType(strings.TrimSpace(string(input.Type)))
