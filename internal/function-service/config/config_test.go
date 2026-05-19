@@ -18,6 +18,9 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT", "25")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT", "7s")
 	t.Setenv("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT", "app.todo.resource.deleted")
+	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT", "4")
+	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT", "6")
+	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT", "21")
 	t.Setenv("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT", "15s")
 
 	cfg, err := Load()
@@ -54,6 +57,15 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	if cfg.ResourceDeletedSubject != "app.todo.resource.deleted" {
 		t.Fatalf("ResourceDeletedSubject = %q, want app.todo.resource.deleted", cfg.ResourceDeletedSubject)
 	}
+	if cfg.SystemResourceLimits.Type != 4 {
+		t.Fatalf("SystemResourceLimits.Type = %d, want 4", cfg.SystemResourceLimits.Type)
+	}
+	if cfg.SystemResourceLimits.Action != 6 {
+		t.Fatalf("SystemResourceLimits.Action = %d, want 6", cfg.SystemResourceLimits.Action)
+	}
+	if cfg.SystemResourceLimits.Tag != 21 {
+		t.Fatalf("SystemResourceLimits.Tag = %d, want 21", cfg.SystemResourceLimits.Tag)
+	}
 	if cfg.ShutdownTimeout != 15*time.Second {
 		t.Fatalf("ShutdownTimeout = %s, want 15s", cfg.ShutdownTimeout)
 	}
@@ -82,6 +94,15 @@ func TestLoadAppliesOptionalDefaults(t *testing.T) {
 	}
 	if cfg.ResourceDeletedSubject != "app.todo.resource.deleted" {
 		t.Fatalf("ResourceDeletedSubject = %q, want app.todo.resource.deleted", cfg.ResourceDeletedSubject)
+	}
+	if cfg.SystemResourceLimits.Type != 3 {
+		t.Fatalf("SystemResourceLimits.Type = %d, want 3", cfg.SystemResourceLimits.Type)
+	}
+	if cfg.SystemResourceLimits.Action != 5 {
+		t.Fatalf("SystemResourceLimits.Action = %d, want 5", cfg.SystemResourceLimits.Action)
+	}
+	if cfg.SystemResourceLimits.Tag != 20 {
+		t.Fatalf("SystemResourceLimits.Tag = %d, want 20", cfg.SystemResourceLimits.Tag)
 	}
 	if cfg.ShutdownTimeout != 10*time.Second {
 		t.Fatalf("ShutdownTimeout = %s, want 10s", cfg.ShutdownTimeout)
@@ -122,6 +143,20 @@ func TestLoadRejectsBlankResourceDeletedSubject(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
 	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
 	t.Setenv("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT", " ")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load error = nil, want error")
+	}
+}
+
+func TestLoadRejectsInvalidSystemResourceLimits(t *testing.T) {
+	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":8080")
+	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", "mongodb://localhost:27017")
+	t.Setenv("FUNCTION_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
+	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
+	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
+	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
+	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT", "0")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load error = nil, want error")

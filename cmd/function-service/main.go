@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
+	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/config"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/handlers"
 	"github.com/hao0731/workspace-permission-management/internal/function-service/repositories"
@@ -74,6 +75,10 @@ func run() error {
 	if ensureIndexErr := permissionRepository.EnsureIndexes(ctx); ensureIndexErr != nil {
 		return ensureIndexErr
 	}
+	systemResourceRepository := repositories.NewMongoSystemResourceRepository(db)
+	if ensureIndexErr := systemResourceRepository.EnsureIndexes(ctx); ensureIndexErr != nil {
+		return ensureIndexErr
+	}
 
 	nc, err := nats.Connect(cfg.NATS.URL)
 	if err != nil {
@@ -90,6 +95,11 @@ func run() error {
 		services.WithResourceDeletedPublisher(newResourceDeletedPublisher(producer, cfg.ResourceDeletedSubject)),
 	)
 	permissionService := services.NewPermissionService(permissionRepository)
+	systemResourceService := services.NewSystemResourceService(systemResourceRepository, resource.ResourceDefinitionLimits{
+		Types:   cfg.SystemResourceLimits.Type,
+		Actions: cfg.SystemResourceLimits.Action,
+		Tags:    cfg.SystemResourceLimits.Tag,
+	})
 
 	eventHandler := handlers.NewResourceEventHandler(resourceService, logger)
 	consumer, err := eventbus.NewJetStreamConsumer(ctx, nc, eventbus.Config{
@@ -107,6 +117,7 @@ func run() error {
 	health.NewHealthManager(processIndicator{}).RegisterRoutes(e)
 	handlers.RegisterRoutes(e, handlers.NewResourceHandler(resourceService, logger, pagination.New()))
 	handlers.RegisterPermissionRoutes(e, handlers.NewPermissionHandler(permissionService, logger))
+	handlers.RegisterSystemResourceRoutes(e, handlers.NewSystemResourceHandler(systemResourceService, logger))
 
 	errCh := make(chan error, 2)
 	go func() {

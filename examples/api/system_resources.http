@@ -1,0 +1,89 @@
+@baseUrl = http://localhost:8080
+@systemId = todo
+
+### Save system resource definitions
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/resources
+Content-Type: application/json
+
+{
+  "resources": [
+    {
+      "type": "action",
+      "label": "Can Edit",
+      "key": "can_edit",
+      "description": "Allows editing resources."
+    },
+    {
+      "type": "action",
+      "label": "Can View",
+      "key": "can_view"
+    },
+    {
+      "type": "tag",
+      "label": "Private",
+      "key": "private"
+    },
+    {
+      "type": "tag",
+      "label": "Public",
+      "key": "public"
+    },
+    {
+      "type": "type",
+      "label": "Repository",
+      "key": "repo"
+    }
+  ]
+}
+
+### List system resource definitions
+GET {{baseUrl}}/api/v1/systems/{{systemId}}/resources
+
+### Get derived system resource attributes
+GET {{baseUrl}}/api/v1/systems/{{systemId}}/resource-attributes
+
+### Invalid key returns 400
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/resources
+Content-Type: application/json
+
+{
+  "resources": [
+    {
+      "type": "action",
+      "label": "Can Edit",
+      "key": "Can-Edit"
+    }
+  ]
+}
+
+### Duplicate request key returns 400
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/resources
+Content-Type: application/json
+
+{
+  "resources": [
+    {
+      "type": "tag",
+      "label": "Private",
+      "key": "private"
+    },
+    {
+      "type": "tag",
+      "label": "Private Copy",
+      "key": "private"
+    }
+  ]
+}
+
+### Too many resource types returns 400 with default limit
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/resources
+Content-Type: application/json
+
+{
+  "resources": [
+    {"type": "type", "label": "Repo", "key": "repo"},
+    {"type": "type", "label": "Page", "key": "page"},
+    {"type": "type", "label": "Issue", "key": "issue"},
+    {"type": "type", "label": "Build", "key": "build"}
+  ]
+}

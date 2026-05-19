@@ -2,7 +2,7 @@
 
 ## Background
 
-The workspace permission management system uses ABAC to manage access across workspaces, groups, functions, resources, and permissions. Functions are capabilities from integrated systems. Each enabled function exposes resources that can later be targeted by permission rules.
+The workspace permission management system uses ABAC to manage access across workspaces, groups, functions, resources, and permissions. Functions are capabilities from integrated systems. Newer product language treats each Function as a System, where `system_id` is the future name for the current `function_key` identity. Each enabled function or system exposes resources that can later be targeted by permission rules.
 
 This design introduces `function-service`, a backend service that maintains a MongoDB resource projection from NATS JetStream CloudEvents, exposes a read API for listing function resources in a workspace, and supports deleting projected resources with a JetStream notification to the owning Function service.
 
@@ -11,6 +11,7 @@ Related concept definitions are documented in [../concept.md](../concept.md).
 Related designs:
 
 - [Function Resource Permissions Design](function-resource-permissions.md) extends `function-service` with `PUT` and `GET` APIs for storing and retrieving one permission configuration per workspace/function pair in `function_resource_permissions`.
+- [Function Service System Resource API Design](function-service-system-resource-api-design.md) extends `function-service` with system-scoped resource type, tag, action, and derived resource attribute APIs. It also documents that `system_id` is the future name for the current `function_key` identity.
 - [Resource Command and Event Domain Contracts](resource-command-event-contracts.md) defines the shared `resource.ResourceUpsertEvent` contract used directly by the `function-service` upsert workflow.
 
 ## Classification and Policies
@@ -48,6 +49,7 @@ Policy alignment:
 - Keep JetStream stream, durable consumer name, fetch count, and wait settings configurable.
 - Subscribe to the fixed resource-upsert subject pattern `app.*.resource.upserted`.
 - Enable health endpoints from `internal/shared/health` in `cmd/function-service/main.go`.
+- Add system-scoped resource definition APIs through [Function Service System Resource API Design](function-service-system-resource-api-design.md).
 
 ## Non-Goals
 
@@ -55,7 +57,7 @@ Policy alignment:
 - Do not validate whether a workspace or function exists before listing or deleting resources.
 - Do not implement an outbox, background retry worker, or delivery guarantee for resource-deleted events in this phase.
 - Do not implement permission evaluation.
-- Do not implement resource action or resource type management APIs.
+- Do not migrate existing workspace-scoped routes, CloudEvents, or stored documents from `function_key` to `system_id` in this phase.
 - Do not introduce frontend changes.
 
 ## Recommended Approach
@@ -295,6 +297,8 @@ cmd/function-service/main.go
 
 internal/domain/resource/
   resource.go
+  resource_definition.go
+  resource_attribute.go
   errors.go
 
 internal/function-service/config/
@@ -302,33 +306,39 @@ internal/function-service/config/
 
 internal/function-service/repositories/
   mongo_resource_repository.go
+  mongo_system_resource_repository.go
 
 internal/function-service/services/
   resource_service.go
+  system_resource_service.go
 
 internal/function-service/handlers/
   resource_event_handler.go
   resource_handler.go
+  system_resource_handler.go
 
 internal/function-service/transport/
   resource_event.go
   resource_deleted_event.go
   resource_response.go
+  system_resource_request.go
+  system_resource_response.go
 ```
 
 See shared pagination refactor design: [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md).
+See system resource API design: [function-service-system-resource-api-design.md](function-service-system-resource-api-design.md).
 
 Responsibilities:
 
 - `cmd/function-service/main.go`: composition root, config loading, MongoDB and NATS setup, JetStream consumer and producer setup, Echo setup, health route registration, resource route registration, eventbus consumer startup, goroutine lifecycle, and graceful shutdown.
-- `internal/domain/resource`: framework-independent resource model, resource command/event contracts, list/delete input validation methods, and domain errors.
+- `internal/domain/resource`: framework-independent resource model, resource command/event contracts, list/delete input validation methods, system resource definition models, `ResourceAttribute` construction, and domain errors.
 - `internal/function-service/config`: environment and `.env` backed config loading through viper, including validation and defaults for optional settings.
 - `internal/shared/environment`: shared runtime environment contract (`Development`, `Production`), `IsValidEnvironment`, and `ErrInvalidEnv` for validation consistency across services.
 - `internal/shared/logger`: shared `logger.New(environment, ...options)` factory; supports environment-aware handler selection and optional `WithLevel` log level override.
-- `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert event persistence, delete query, and list query.
-- `internal/function-service/services`: resource upsert, list, and delete workflows. Services call domain event/input/query `Validate` methods before repositories or publishers, define consumer-side repository and publisher interfaces, and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
+- `internal/function-service/repositories`: MongoDB document mapping, index initialization, upsert event persistence, delete query, list query, system resource definition persistence, resource attribute persistence, and transaction implementation.
+- `internal/function-service/services`: resource upsert, list, delete, system resource definition save/list, and system resource attribute read workflows. Services call domain event/input/query `Validate` methods before repositories or publishers, define consumer-side repository and publisher interfaces, own transaction orchestration where applicable, and do not depend on Echo, MongoDB, NATS, JetStream, or transport DTOs.
 - `internal/function-service/handlers`: Echo HTTP handler, route registration, and eventbus handler. Handlers parse transport input, call services, and map errors to HTTP responses or eventbus handle results.
-- `internal/function-service/transport`: CloudEvent data DTOs, HTTP response DTOs, resource-upsert event parsing to `resource.ResourceUpsertEvent`, resource-deleted event DTO construction, and DTO/domain mapping. Pagination query parsing and cursor token encode/decode are provided by the shared pagination package (see [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md)).
+- `internal/function-service/transport`: CloudEvent data DTOs, HTTP request/response DTOs, resource-upsert event parsing to `resource.ResourceUpsertEvent`, resource-deleted event DTO construction, system resource request/response mapping, and DTO/domain mapping. Pagination query parsing and cursor token encode/decode are provided by the shared pagination package (see [shared-pagination-helper-refactor.md](shared-pagination-helper-refactor.md)).
 
 ## Resource Input Validation Boundary
 
@@ -369,6 +379,9 @@ Optional settings:
 - `FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT`, default `20`.
 - `FUNCTION_SERVICE_JETSTREAM_MAX_WAIT`, default `5s`.
 - `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT`, default `app.todo.resource.deleted`.
+- `FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT`, default `3`.
+- `FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT`, default `5`.
+- `FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT`, default `20`.
 - `FUNCTION_SERVICE_SHUTDOWN_TIMEOUT`, default `10s`.
 
 Environment behavior:
@@ -392,6 +405,7 @@ Config validation:
 - Required string settings must be non-empty.
 - `FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT` must be non-empty after applying its default.
 - Fetch count must be greater than zero.
+- System resource definition limits must be positive integers.
 - Durations must be valid and positive.
 - Invalid config fails startup.
 
@@ -404,13 +418,14 @@ Startup responsibilities:
 1. Load and validate config.
 2. Initialize `slog`.
 3. Connect to MongoDB.
-4. Initialize MongoDB indexes for `function_resources`.
+4. Initialize MongoDB indexes for `function_resources`, `system_resources`, and `system_resource_attributes`.
 5. Connect to NATS.
 6. Create an `internal/shared/eventbus` JetStream producer for resource-deleted events.
 7. Create an `internal/shared/eventbus` JetStream consumer using configured stream, durable, fetch count, wait duration, and the fixed `app.*.resource.upserted` filter.
 8. Create Echo and register:
    - `/health/liveness` from `internal/shared/health`.
    - resource API routes.
+   - system resource definition API routes.
 9. Run the HTTP server in a goroutine.
 10. Run the JetStream consumer in a goroutine.
 11. Wait for OS signal or runtime error.
@@ -501,6 +516,16 @@ Success response:
 ```http
 HTTP/1.1 204 No Content
 ```
+
+System resource definition endpoints:
+
+```http
+POST /api/v1/systems/:system_id/resources
+GET /api/v1/systems/:system_id/resources
+GET /api/v1/systems/:system_id/resource-attributes
+```
+
+These endpoints are specified in [Function Service System Resource API Design](function-service-system-resource-api-design.md). They use `system_id`, which is the future name for the current `function_key` identity. Existing workspace-scoped routes continue to use `function_key` in this phase.
 
 ## Cursor Pagination
 

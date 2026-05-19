@@ -16,6 +16,7 @@ type Config struct {
 	MongoDB                MongoDBConfig
 	NATS                   NATSConfig
 	JetStream              JetStreamConfig
+	SystemResourceLimits   SystemResourceLimitsConfig
 	ResourceDeletedSubject string
 	ShutdownTimeout        time.Duration
 }
@@ -36,6 +37,12 @@ type JetStreamConfig struct {
 	MaxWait    time.Duration
 }
 
+type SystemResourceLimitsConfig struct {
+	Type   int
+	Action int
+	Tag    int
+}
+
 func Load() (Config, error) {
 	v := viper.New()
 	v.SetConfigFile(".env")
@@ -47,6 +54,9 @@ func Load() (Config, error) {
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT", 20)
 	v.SetDefault("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT", "5s")
 	v.SetDefault("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT", "app.todo.resource.deleted")
+	v.SetDefault("FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT", 3)
+	v.SetDefault("FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT", 5)
+	v.SetDefault("FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT", 20)
 	v.SetDefault("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT", "10s")
 
 	cfg := Config{
@@ -64,6 +74,11 @@ func Load() (Config, error) {
 			Durable:    v.GetString("FUNCTION_SERVICE_JETSTREAM_DURABLE"),
 			FetchCount: v.GetInt("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT"),
 			MaxWait:    v.GetDuration("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT"),
+		},
+		SystemResourceLimits: SystemResourceLimitsConfig{
+			Type:   v.GetInt("FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT"),
+			Action: v.GetInt("FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT"),
+			Tag:    v.GetInt("FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT"),
 		},
 		ResourceDeletedSubject: v.GetString("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT"),
 		ShutdownTimeout:        v.GetDuration("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT"),
@@ -96,6 +111,15 @@ func (c Config) Validate() error {
 	}
 	if c.JetStream.FetchCount <= 0 {
 		return fmt.Errorf("FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT must be greater than zero")
+	}
+	if c.SystemResourceLimits.Type <= 0 {
+		return fmt.Errorf("FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT must be greater than zero")
+	}
+	if c.SystemResourceLimits.Action <= 0 {
+		return fmt.Errorf("FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT must be greater than zero")
+	}
+	if c.SystemResourceLimits.Tag <= 0 {
+		return fmt.Errorf("FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT must be greater than zero")
 	}
 	if c.JetStream.MaxWait <= 0 {
 		return fmt.Errorf("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT must be positive")
