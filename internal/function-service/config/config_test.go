@@ -7,7 +7,21 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/shared/environment"
 )
 
+func setRequiredFunctionServiceEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":8080")
+	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", "mongodb://localhost:27017")
+	t.Setenv("FUNCTION_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
+	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
+	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
+	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_BASE_URL", "http://localhost:8086")
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_KEY", "dev-permission-api-key")
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER", "X-API-Key")
+}
+
 func TestLoadReadsRequiredEnvironment(t *testing.T) {
+	setRequiredFunctionServiceEnv(t)
 	t.Setenv("FUNCTION_SERVICE_ENV", "production")
 	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":9090")
 	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", "mongodb://example:27017")
@@ -21,6 +35,9 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT", "4")
 	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT", "6")
 	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT", "21")
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_BASE_URL", "https://permission.example.com")
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_KEY", "prod-key")
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER", "X-Permission-Key")
 	t.Setenv("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT", "15s")
 
 	cfg, err := Load()
@@ -66,18 +83,22 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	if cfg.SystemResourceLimits.Tag != 21 {
 		t.Fatalf("SystemResourceLimits.Tag = %d, want 21", cfg.SystemResourceLimits.Tag)
 	}
+	if cfg.PermissionAPI.BaseURL != "https://permission.example.com" {
+		t.Fatalf("PermissionAPI.BaseURL = %q, want https://permission.example.com", cfg.PermissionAPI.BaseURL)
+	}
+	if cfg.PermissionAPI.APIKey != "prod-key" {
+		t.Fatalf("PermissionAPI.APIKey = %q, want prod-key", cfg.PermissionAPI.APIKey)
+	}
+	if cfg.PermissionAPI.APIKeyHeader != "X-Permission-Key" {
+		t.Fatalf("PermissionAPI.APIKeyHeader = %q, want X-Permission-Key", cfg.PermissionAPI.APIKeyHeader)
+	}
 	if cfg.ShutdownTimeout != 15*time.Second {
 		t.Fatalf("ShutdownTimeout = %s, want 15s", cfg.ShutdownTimeout)
 	}
 }
 
 func TestLoadAppliesOptionalDefaults(t *testing.T) {
-	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":8080")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", "mongodb://localhost:27017")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
-	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
+	setRequiredFunctionServiceEnv(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -110,13 +131,8 @@ func TestLoadAppliesOptionalDefaults(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidEnvironment(t *testing.T) {
+	setRequiredFunctionServiceEnv(t)
 	t.Setenv("FUNCTION_SERVICE_ENV", "staging")
-	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":8080")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", "mongodb://localhost:27017")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
-	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load error = nil, want error")
@@ -124,11 +140,8 @@ func TestLoadRejectsInvalidEnvironment(t *testing.T) {
 }
 
 func TestLoadRejectsMissingRequiredValue(t *testing.T) {
-	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":8080")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
-	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
+	setRequiredFunctionServiceEnv(t)
+	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", " ")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load error = nil, want error")
@@ -136,12 +149,7 @@ func TestLoadRejectsMissingRequiredValue(t *testing.T) {
 }
 
 func TestLoadRejectsBlankResourceDeletedSubject(t *testing.T) {
-	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":8080")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", "mongodb://localhost:27017")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
-	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
+	setRequiredFunctionServiceEnv(t)
 	t.Setenv("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT", " ")
 
 	if _, err := Load(); err == nil {
@@ -150,13 +158,35 @@ func TestLoadRejectsBlankResourceDeletedSubject(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidSystemResourceLimits(t *testing.T) {
-	t.Setenv("FUNCTION_SERVICE_HTTP_ADDR", ":8080")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_URI", "mongodb://localhost:27017")
-	t.Setenv("FUNCTION_SERVICE_MONGODB_DATABASE", "workspace_permission_management")
-	t.Setenv("FUNCTION_SERVICE_NATS_URL", "nats://localhost:4222")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_STREAM", "FUNCTION_RESOURCES")
-	t.Setenv("FUNCTION_SERVICE_JETSTREAM_DURABLE", "function-service-resource-upserter")
+	setRequiredFunctionServiceEnv(t)
 	t.Setenv("FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT", "0")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load error = nil, want error")
+	}
+}
+
+func TestLoadRejectsInvalidPermissionAPIBaseURL(t *testing.T) {
+	setRequiredFunctionServiceEnv(t)
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_BASE_URL", "localhost:8086")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load error = nil, want error")
+	}
+}
+
+func TestLoadRejectsBlankPermissionAPIKey(t *testing.T) {
+	setRequiredFunctionServiceEnv(t)
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_KEY", " ")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load error = nil, want error")
+	}
+}
+
+func TestLoadRejectsInvalidPermissionAPIKeyHeader(t *testing.T) {
+	setRequiredFunctionServiceEnv(t)
+	t.Setenv("FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER", "Bad Header")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load error = nil, want error")

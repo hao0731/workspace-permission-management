@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ type Config struct {
 	NATS                   NATSConfig
 	JetStream              JetStreamConfig
 	SystemResourceLimits   SystemResourceLimitsConfig
+	PermissionAPI          PermissionAPIConfig
 	ResourceDeletedSubject string
 	ShutdownTimeout        time.Duration
 }
@@ -41,6 +43,12 @@ type SystemResourceLimitsConfig struct {
 	Type   int
 	Action int
 	Tag    int
+}
+
+type PermissionAPIConfig struct {
+	BaseURL      string
+	APIKey       string
+	APIKeyHeader string
 }
 
 func Load() (Config, error) {
@@ -80,6 +88,11 @@ func Load() (Config, error) {
 			Action: v.GetInt("FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT"),
 			Tag:    v.GetInt("FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT"),
 		},
+		PermissionAPI: PermissionAPIConfig{
+			BaseURL:      v.GetString("FUNCTION_SERVICE_PERMISSION_API_BASE_URL"),
+			APIKey:       v.GetString("FUNCTION_SERVICE_PERMISSION_API_KEY"),
+			APIKeyHeader: v.GetString("FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER"),
+		},
 		ResourceDeletedSubject: v.GetString("FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT"),
 		ShutdownTimeout:        v.GetDuration("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT"),
 	}
@@ -96,13 +109,16 @@ func (c Config) Validate() error {
 	}
 
 	required := map[string]string{
-		"FUNCTION_SERVICE_HTTP_ADDR":                c.HTTPAddr,
-		"FUNCTION_SERVICE_MONGODB_URI":              c.MongoDB.URI,
-		"FUNCTION_SERVICE_MONGODB_DATABASE":         c.MongoDB.Database,
-		"FUNCTION_SERVICE_NATS_URL":                 c.NATS.URL,
-		"FUNCTION_SERVICE_JETSTREAM_STREAM":         c.JetStream.Stream,
-		"FUNCTION_SERVICE_JETSTREAM_DURABLE":        c.JetStream.Durable,
-		"FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT": c.ResourceDeletedSubject,
+		"FUNCTION_SERVICE_HTTP_ADDR":                 c.HTTPAddr,
+		"FUNCTION_SERVICE_MONGODB_URI":               c.MongoDB.URI,
+		"FUNCTION_SERVICE_MONGODB_DATABASE":          c.MongoDB.Database,
+		"FUNCTION_SERVICE_NATS_URL":                  c.NATS.URL,
+		"FUNCTION_SERVICE_JETSTREAM_STREAM":          c.JetStream.Stream,
+		"FUNCTION_SERVICE_JETSTREAM_DURABLE":         c.JetStream.Durable,
+		"FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT":  c.ResourceDeletedSubject,
+		"FUNCTION_SERVICE_PERMISSION_API_BASE_URL":   c.PermissionAPI.BaseURL,
+		"FUNCTION_SERVICE_PERMISSION_API_KEY":        c.PermissionAPI.APIKey,
+		"FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER": c.PermissionAPI.APIKeyHeader,
 	}
 	for key, value := range required {
 		if strings.TrimSpace(value) == "" {
@@ -121,6 +137,12 @@ func (c Config) Validate() error {
 	if c.SystemResourceLimits.Tag <= 0 {
 		return fmt.Errorf("FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT must be greater than zero")
 	}
+	if err := validatePermissionAPIBaseURL(c.PermissionAPI.BaseURL); err != nil {
+		return err
+	}
+	if !isHTTPHeaderName(strings.TrimSpace(c.PermissionAPI.APIKeyHeader)) {
+		return fmt.Errorf("FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER must be a valid HTTP header name")
+	}
 	if c.JetStream.MaxWait <= 0 {
 		return fmt.Errorf("FUNCTION_SERVICE_JETSTREAM_MAX_WAIT must be positive")
 	}
@@ -128,4 +150,37 @@ func (c Config) Validate() error {
 		return fmt.Errorf("FUNCTION_SERVICE_SHUTDOWN_TIMEOUT must be positive")
 	}
 	return nil
+}
+
+func validatePermissionAPIBaseURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("FUNCTION_SERVICE_PERMISSION_API_BASE_URL must be an absolute http or https URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("FUNCTION_SERVICE_PERMISSION_API_BASE_URL must be an absolute http or https URL")
+	}
+	return nil
+}
+
+func isHTTPHeaderName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if strings.ContainsRune("!#$%&'*+-.^_`|~", r) {
+			continue
+		}
+		return false
+	}
+	return true
 }

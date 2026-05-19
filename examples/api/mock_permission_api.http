@@ -1,0 +1,30 @@
+@baseUrl = http://localhost:8086
+@apiKey = dev-permission-api-key
+
+### Register schema resource attributes
+POST {{baseUrl}}/api/v1/schema/write
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "definition": "todo",
+  "relations": [
+    {
+      "resAttr": "can_edit_private_repo",
+      "condition": "enable_dynamic_context",
+      "isPublic": false
+    },
+    {
+      "resAttr": "can_view_public_repo",
+      "condition": "enable_dynamic_context",
+      "isPublic": false
+    }
+  ]
+}
+
+### Malformed payload returns 400
+POST {{baseUrl}}/api/v1/schema/write
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
