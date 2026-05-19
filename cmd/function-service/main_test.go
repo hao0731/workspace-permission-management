@@ -10,8 +10,10 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
+	functionconfig "github.com/hao0731/workspace-permission-management/internal/function-service/config"
 	"github.com/hao0731/workspace-permission-management/internal/shared/environment"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
+	permissionapi "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api"
 	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
 )
 
@@ -50,6 +52,17 @@ func TestLoggerNewReturnsSlogLogger(t *testing.T) {
 	logger := sharedlogger.New(environment.Development)
 	if logger == nil {
 		t.Fatal("logger = nil, want slog logger")
+	}
+}
+
+func TestNewPermissionClientReturnsAPIClient(t *testing.T) {
+	client := newPermissionClient(functionconfig.PermissionAPIConfig{
+		BaseURL:      "http://localhost:8086",
+		APIKey:       "dev-permission-api-key",
+		APIKeyHeader: "X-API-Key",
+	})
+	if _, ok := client.(*permissionapi.Client); !ok {
+		t.Fatalf("permission client type = %T, want *api.Client", client)
 	}
 }
 
