@@ -327,21 +327,13 @@ The mock uses the same request DTOs as the client so local tests detect payload 
 
 `.env` and `.env.example` should include the function-service permission API values and mock service config.
 
-`docker-compose.yml` should add a `mock-permission-api` service using `go run ./cmd/mock-permission-api`, expose host port `8086`, and set:
+`docker-compose.yml` should add only a `mock-permission-api` service using `go run ./cmd/mock-permission-api`, expose host port `8086`, and set:
 
 ```yaml
 MOCK_PERMISSION_API_HTTP_ADDR: :8086
 ```
 
-The `function-service` container should point to the mock service by service name:
-
-```yaml
-FUNCTION_SERVICE_PERMISSION_API_BASE_URL: http://mock-permission-api:8086
-FUNCTION_SERVICE_PERMISSION_API_KEY: dev-permission-api-key
-FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER: X-API-Key
-```
-
-For local non-Docker runs, use `http://localhost:8086`.
+`function-service` does not need to be added to `docker-compose.yml` for this change. For local runs, start `function-service` outside Compose with `.env` values that point to `http://localhost:8086`.
 
 ## API Example
 

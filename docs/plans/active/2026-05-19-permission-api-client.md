@@ -64,7 +64,7 @@ Policy summary:
 - Modify: `.env.example`
   - Document required permission API and mock permission API variables.
 - Modify: `docker-compose.yml`
-  - Add `mock-permission-api` and `function-service` services.
+  - Add only the `mock-permission-api` service.
 - Create: `examples/api/mock_permission_api.http`
   - Manual REST Client examples for schema-write success and malformed JSON.
 - Move after implementation: `docs/plans/active/2026-05-19-permission-api-client.md`
@@ -1168,9 +1168,9 @@ MOCK_PERMISSION_API_HTTP_ADDR=:8086
 MOCK_PERMISSION_API_SHUTDOWN_TIMEOUT=10s
 ```
 
-- [ ] **Step 2: Add Docker Compose services**
+- [ ] **Step 2: Add Docker Compose service**
 
-In `docker-compose.yml`, add `mock-permission-api` and `function-service` before `group-expiry-scheduler`:
+In `docker-compose.yml`, add `mock-permission-api` before `group-expiry-scheduler`:
 
 ```yaml
   mock-permission-api:
@@ -1189,45 +1189,9 @@ In `docker-compose.yml`, add `mock-permission-api` and `function-service` before
       - "8086:8086"
     networks:
       - workspace_permission_management
-
-  function-service:
-    image: golang:1.25
-    container_name: workspace-permission-management-function-service
-    working_dir: /workspace
-    command: ["go", "run", "./cmd/function-service"]
-    volumes:
-      - .:/workspace
-      - go_mod_cache:/go/pkg/mod
-    environment:
-      FUNCTION_SERVICE_ENV: development
-      FUNCTION_SERVICE_HTTP_ADDR: :8080
-      FUNCTION_SERVICE_MONGODB_URI: mongodb://mongodb:27017/?replicaSet=rs0
-      FUNCTION_SERVICE_MONGODB_DATABASE: workspace_permission_management
-      FUNCTION_SERVICE_NATS_URL: nats://nats:4222
-      FUNCTION_SERVICE_JETSTREAM_STREAM: ${FUNCTION_SERVICE_JETSTREAM_STREAM:-FUNCTION_RESOURCES}
-      FUNCTION_SERVICE_JETSTREAM_DURABLE: ${FUNCTION_SERVICE_JETSTREAM_DURABLE:-function-service-resource-upserter}
-      FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT: ${FUNCTION_SERVICE_JETSTREAM_FETCH_COUNT:-20}
-      FUNCTION_SERVICE_JETSTREAM_MAX_WAIT: ${FUNCTION_SERVICE_JETSTREAM_MAX_WAIT:-5s}
-      FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT: ${FUNCTION_SERVICE_RESOURCE_DELETED_SUBJECT:-app.todo.resource.deleted}
-      FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT: ${FUNCTION_SERVICE_SYSTEM_RESOURCE_TYPE_LIMIT:-3}
-      FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT: ${FUNCTION_SERVICE_SYSTEM_RESOURCE_ACTION_LIMIT:-5}
-      FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT: ${FUNCTION_SERVICE_SYSTEM_RESOURCE_TAG_LIMIT:-20}
-      FUNCTION_SERVICE_PERMISSION_API_BASE_URL: http://mock-permission-api:8086
-      FUNCTION_SERVICE_PERMISSION_API_KEY: ${FUNCTION_SERVICE_PERMISSION_API_KEY:-dev-permission-api-key}
-      FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER: ${FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER:-X-API-Key}
-      FUNCTION_SERVICE_SHUTDOWN_TIMEOUT: ${FUNCTION_SERVICE_SHUTDOWN_TIMEOUT:-10s}
-    ports:
-      - "8080:8080"
-    depends_on:
-      mongo-init:
-        condition: service_completed_successfully
-      nats-init:
-        condition: service_completed_successfully
-      mock-permission-api:
-        condition: service_started
-    networks:
-      - workspace_permission_management
 ```
+
+Do not add `function-service` to `docker-compose.yml`. Local function-service runs should use `.env` with `FUNCTION_SERVICE_PERMISSION_API_BASE_URL=http://localhost:8086`.
 
 - [ ] **Step 3: Add REST Client examples**
 
@@ -1274,12 +1238,12 @@ Run:
 docker compose config >/tmp/workspace-permission-management-compose.yml
 ```
 
-Expected: command exits 0 and renders a compose config that includes `mock-permission-api` and `function-service`.
+Expected: command exits 0 and renders a compose config that includes `mock-permission-api`.
 
 If Docker is not available in the execution environment, record that this command was skipped and run this text-only check instead:
 
 ```bash
-rg -n "mock-permission-api|FUNCTION_SERVICE_PERMISSION_API_BASE_URL|cmd/function-service|cmd/mock-permission-api" docker-compose.yml .env .env.example examples/api/mock_permission_api.http
+rg -n "mock-permission-api|FUNCTION_SERVICE_PERMISSION_API_BASE_URL|cmd/mock-permission-api" docker-compose.yml .env .env.example examples/api/mock_permission_api.http
 ```
 
 Expected: all four files contain the new permission API references.
