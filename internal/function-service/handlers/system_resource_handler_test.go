@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
+	"github.com/hao0731/workspace-permission-management/internal/function-service/services"
 	"github.com/labstack/echo/v5"
 )
 
@@ -132,5 +133,34 @@ func TestSystemResourceHandlerServiceFailure(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestSystemResourceHandlerPermissionRegistrationFailure(t *testing.T) {
+	service := &fakeHTTPSystemResourceService{saveErr: services.ErrPermissionRegistrationFailed}
+	e := echo.New()
+	RegisterSystemResourceRoutes(e, NewSystemResourceHandler(service, newTestLogger()))
+	req := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/api/v1/systems/todo/resources",
+		bytes.NewBufferString(`{"resources":[{"type":"action","label":"Can Edit","key":"can_edit"}]}`),
+	)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	var response struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Error.Code != "permission_registration_failed" {
+		t.Fatalf("code = %q, want permission_registration_failed", response.Error.Code)
 	}
 }
