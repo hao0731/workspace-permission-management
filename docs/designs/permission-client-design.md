@@ -4,7 +4,7 @@
 
 System resource definitions managed by `function-service` produce derived resource attributes. Those attributes must be registered with an external permission system after `function-service` has persisted the local resource definition and attribute state.
 
-This design defines the shared permission interaction boundary. The first concrete implementation is intentionally in-memory and is documented in [In-Memory Permission Client Design](inmemory-permission-client-design.md). The caller integration from the system resource API is documented in [Function Service System Resource API Design](function-service-system-resource-api-design.md).
+This design defines the shared permission interaction boundary. The HTTP API implementation is documented in [Permission API Client Design](permission-api-client-design.md). The original in-memory implementation remains documented in [In-Memory Permission Client Design](inmemory-permission-client-design.md) for tests and local fallback use. The caller integration from the system resource API is documented in [Function Service System Resource API Design](function-service-system-resource-api-design.md).
 
 ## Classification and Policies
 
@@ -20,8 +20,9 @@ Policy alignment:
 - The client interface is an explicit shared interaction contract under `internal/shared/interactions/permission`.
 - The shared interaction package must not depend on any service-specific package.
 - The interface may depend on `internal/domain/resource` because resource attributes are part of the shared resource domain vocabulary.
-- Concrete external transport concerns must stay behind this client boundary and out of `function-service` services, handlers, transport DTOs, and domain packages.
-- This design document is stored under `docs/designs/` and cross-linked from related system resource designs.
+- Concrete external transport concerns stay behind this client boundary in concrete packages such as `internal/shared/interactions/permission/api`.
+- `function-service` services, handlers, transport DTOs, and domain packages must not depend on the API client's HTTP DTOs or `net/http`.
+- This design document is stored under `docs/designs/` and cross-linked from related system resource and client designs.
 
 ## Goals
 
@@ -31,12 +32,13 @@ Policy alignment:
 - Accept `systemID` as the system identity currently equivalent to `function_key`.
 - Accept derived `[]resource.ResourceAttribute` values from `internal/domain/resource`.
 - Let callers treat any returned error as an upstream permission registration failure.
-- Keep the interface stable so `function-service` can start with an in-memory implementation and later switch to a real permission service client from the composition root.
+- Keep the interface stable so `function-service` can switch concrete clients from the composition root.
+- Use the API client as the `function-service` runtime wiring once permission API configuration is available.
 
 ## Non-Goals
 
-- Do not implement the real external permission service client in this phase.
-- Do not define HTTP routes, payloads, authentication, retries, or timeouts for the future external permission service in this phase.
+- Do not put HTTP payloads or remote API errors in the base `permission` package.
+- Do not make permission registration asynchronous in this phase.
 - Do not add asynchronous delivery, background workers, or outbox storage in this phase.
 - Do not move resource attribute derivation out of `function-service` in this phase.
 - Do not introduce frontend changes.
@@ -80,7 +82,12 @@ Error contract:
 
 - Return `nil` when registration is accepted or completed by the concrete implementation.
 - Return an error when registration cannot be completed.
-- The interface does not prescribe a concrete error type yet. Callers map errors at their own boundary.
+- The base interface does not prescribe a concrete error type. Concrete clients may expose implementation-specific errors, but callers map errors at their own boundary.
+
+Concrete implementations:
+
+- [Permission API Client Design](permission-api-client-design.md) defines `internal/shared/interactions/permission/api`, which sends `POST <baseURL>/api/v1/schema/write`.
+- [In-Memory Permission Client Design](inmemory-permission-client-design.md) defines `internal/shared/interactions/permission/inmemory`, which logs at debug level and returns success.
 
 ## Function Service Usage
 
@@ -93,7 +100,26 @@ Error contract:
 
 This is not a cross-system atomic transaction. A permission registration failure does not roll back already committed local MongoDB changes.
 
-The first wiring uses `internal/shared/interactions/permission/inmemory.New(inmemory.WithLogger(logger))` in `cmd/function-service/main.go`. A future production client should replace only the concrete wiring and any required configuration, not the `function-service` service workflow contract.
+Runtime wiring should use the API client from `internal/shared/interactions/permission/api`:
+
+```go
+permissionClient := permissionapi.New(
+	cfg.PermissionAPI.BaseURL,
+	cfg.PermissionAPI.APIKey,
+	cfg.PermissionAPI.APIKeyHeader,
+)
+```
+
+`cmd/function-service/main.go` is responsible for constructing the concrete client from configuration and injecting it into `SystemResourceService`. The in-memory client remains available for tests or explicit local fallback, but it should not be the default function-service runtime wiring after the API client is implemented.
+
+The API client maps the interface input to the remote schema-write API:
+
+- `definition` is `systemID`.
+- Each `resource.ResourceAttribute` becomes one relation.
+- Each relation uses fixed `condition: enable_dynamic_context`.
+- Each relation uses fixed `isPublic: false`.
+
+The detailed payload, header, and error contracts are owned by [Permission API Client Design](permission-api-client-design.md).
 
 ## Future Async Option
 
@@ -104,7 +130,7 @@ If permission registration later needs retries, stronger delivery guarantees, or
 - Process outbox records with a background worker that calls the real permission client.
 - Track retry count, last error, and delivery status for operational visibility.
 
-That strategy is intentionally deferred because the current requirement is synchronous post-commit registration with an in-memory placeholder client.
+That strategy is intentionally deferred because the current requirement is synchronous post-commit registration through the shared permission client boundary.
 
 ## Testing Strategy
 
@@ -113,17 +139,27 @@ Interface package checks:
 - `internal/shared/interactions/permission` compiles with only standard library and domain imports.
 - Concrete clients assert they implement `permission.Client`.
 
+API client tests:
+
+- `RegisterResourceAttributes` sends `POST /api/v1/schema/write`.
+- Requests include `Content-Type: application/json`.
+- Requests include the configured API key header and value.
+- Payloads map `systemID` and resource attributes to the remote schema-write contract.
+- Non-2xx responses decode the permission API error shape where possible.
+
 Function service tests:
 
 - Save calls `RegisterResourceAttributes` after a successful local transaction when derived attributes exist.
 - Save does not call the client when derived attributes are empty.
 - Client failure is logged and returned as an upstream dependency failure.
 - Client failure does not undo the local repository calls already completed before registration.
+- Function-service config validates the required permission API settings.
+- Function-service composition wiring uses the API client rather than the in-memory client.
 
 Verification commands for implementation:
 
 ```bash
-go test ./internal/shared/interactions/permission/... ./internal/function-service/...
+go test ./internal/shared/interactions/permission/... ./internal/function-service/... ./cmd/function-service
 go test ./...
 ```
 
@@ -135,8 +171,12 @@ go test ./...
 
 2. Pass `[]resource.ResourceAttribute` instead of transport DTOs or raw strings.
    - Rationale: Resource attributes are already a domain concept and this keeps callers away from external permission transport shapes.
-   - Trade-off: A future real client may need a mapper from domain attributes to its remote API payload.
+   - Trade-off: Concrete clients need mappers from domain attributes to remote API payloads.
 
 3. Keep registration synchronous for the first integration.
    - Rationale: The caller gets immediate feedback when permission registration fails, matching the requested API behavior.
    - Trade-off: The POST response can fail after local persistence has committed, so clients may need to retry registration through a future operation if a repeated POST is not appropriate.
+
+4. Keep API request and error DTOs in the concrete API client package.
+   - Rationale: Remote transport contracts should not leak into the base interface or function-service service layer.
+   - Trade-off: Tests need to cover the mapper because type checking alone cannot prove the remote payload is correct.
