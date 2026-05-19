@@ -22,6 +22,7 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 	"github.com/hao0731/workspace-permission-management/internal/shared/health"
+	permissioninmemory "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/inmemory"
 	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
 	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 )
@@ -99,7 +100,7 @@ func run() error {
 		Types:   cfg.SystemResourceLimits.Type,
 		Actions: cfg.SystemResourceLimits.Action,
 		Tags:    cfg.SystemResourceLimits.Tag,
-	})
+	}, permissioninmemory.New(permissioninmemory.WithLogger(logger)))
 
 	eventHandler := handlers.NewResourceEventHandler(resourceService, logger)
 	consumer, err := eventbus.NewJetStreamConsumer(ctx, nc, eventbus.Config{
