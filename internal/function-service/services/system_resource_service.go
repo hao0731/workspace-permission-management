@@ -2,14 +2,19 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
+	clientpermission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 )
+
+var ErrPermissionRegistrationFailed = errors.New("permission registration failed")
 
 type SystemResourceRepository interface {
 	RunInTransaction(ctx context.Context, fn func(context.Context) error) error
@@ -37,19 +42,31 @@ func WithSystemResourceIDGenerator(generator func() string) SystemResourceOption
 	}
 }
 
-type SystemResourceService struct {
-	repository  SystemResourceRepository
-	limits      resource.ResourceDefinitionLimits
-	clock       func() time.Time
-	idGenerator func() string
+func WithSystemResourceLogger(logger *slog.Logger) SystemResourceOption {
+	return func(s *SystemResourceService) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
 }
 
-func NewSystemResourceService(repository SystemResourceRepository, limits resource.ResourceDefinitionLimits, opts ...SystemResourceOption) *SystemResourceService {
+type SystemResourceService struct {
+	repository       SystemResourceRepository
+	limits           resource.ResourceDefinitionLimits
+	permissionClient clientpermission.Client
+	clock            func() time.Time
+	idGenerator      func() string
+	logger           *slog.Logger
+}
+
+func NewSystemResourceService(repository SystemResourceRepository, limits resource.ResourceDefinitionLimits, permissionClient clientpermission.Client, opts ...SystemResourceOption) *SystemResourceService {
 	service := &SystemResourceService{
-		repository:  repository,
-		limits:      limits,
-		clock:       func() time.Time { return time.Now().UTC() },
-		idGenerator: uuid.NewString,
+		repository:       repository,
+		limits:           limits,
+		permissionClient: permissionClient,
+		clock:            func() time.Time { return time.Now().UTC() },
+		idGenerator:      uuid.NewString,
+		logger:           slog.Default(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -85,6 +102,7 @@ func (s *SystemResourceService) SaveSystemResources(ctx context.Context, input r
 	attributeID := s.idGenerator()
 
 	var saved []resource.ResourceDefinition
+	var derivedAttributes []resource.ResourceAttribute
 	if err := s.repository.RunInTransaction(ctx, func(tx context.Context) error {
 		existing, err := s.repository.ListResourceDefinitions(tx, resource.ResourceDefinitionsQuery{SystemID: normalized.SystemID})
 		if err != nil {
@@ -106,6 +124,7 @@ func (s *SystemResourceService) SaveSystemResources(ctx context.Context, input r
 		if len(attributes) == 0 {
 			return nil
 		}
+		derivedAttributes = append([]resource.ResourceAttribute(nil), attributes...)
 		if _, err := s.repository.UpsertResourceAttributes(tx, resource.ResourceAttributes{
 			ID:        attributeID,
 			SystemID:  normalized.SystemID,
@@ -119,7 +138,33 @@ func (s *SystemResourceService) SaveSystemResources(ctx context.Context, input r
 	}); err != nil {
 		return nil, err
 	}
+	if len(derivedAttributes) > 0 {
+		if err := s.registerResourceAttributes(ctx, normalized.SystemID, derivedAttributes); err != nil {
+			return nil, err
+		}
+	}
 	return saved, nil
+}
+
+func (s *SystemResourceService) registerResourceAttributes(ctx context.Context, systemID string, attributes []resource.ResourceAttribute) error {
+	if s.permissionClient == nil {
+		err := errors.New("permission client is not configured")
+		s.logger.ErrorContext(ctx, "failed to register resource attributes",
+			"err", err,
+			"system_id", systemID,
+			"resource_attribute_count", len(attributes),
+		)
+		return fmt.Errorf("%w: %w", ErrPermissionRegistrationFailed, err)
+	}
+	if err := s.permissionClient.RegisterResourceAttributes(ctx, systemID, attributes); err != nil {
+		s.logger.ErrorContext(ctx, "failed to register resource attributes",
+			"err", err,
+			"system_id", systemID,
+			"resource_attribute_count", len(attributes),
+		)
+		return fmt.Errorf("%w: %w", ErrPermissionRegistrationFailed, err)
+	}
+	return nil
 }
 
 func (s *SystemResourceService) ListSystemResources(ctx context.Context, query resource.ResourceDefinitionsQuery) ([]resource.ResourceDefinition, error) {
