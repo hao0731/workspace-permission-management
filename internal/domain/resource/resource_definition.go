@@ -200,10 +200,8 @@ func validateSystemID(systemID string) error {
 	if strings.Contains(systemID, ".") {
 		return invalidInput("system id must be a single subject token")
 	}
-	for _, r := range systemID {
-		if unicode.IsSpace(r) {
-			return invalidInput("system id must be a single subject token")
-		}
+	if strings.IndexFunc(systemID, unicode.IsSpace) >= 0 {
+		return invalidInput("system id must be a single subject token")
 	}
 	return nil
 }
