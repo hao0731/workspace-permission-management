@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,12 +68,30 @@ func TestSystemGroupDocumentToDomainConvertsBSONArrays(t *testing.T) {
 }
 
 func TestNewSystemGroupRelationshipDocumentMapping(t *testing.T) {
-	doc := newSystemGroupRelationshipDocument(repositorySystemGroupProjection())
+	doc, err := newSystemGroupRelationshipDocument(repositorySystemGroupProjection())
+	if err != nil {
+		t.Fatalf("newSystemGroupRelationshipDocument error = %v, want nil", err)
+	}
 	if doc.SystemID != "system-a" || doc.GroupID != "group-1" {
 		t.Fatalf("doc = %+v, want projection identity", doc)
 	}
 	if len(doc.Relationships) != 1 || doc.Relationships[0].Checksum != "checksum-1" {
 		t.Fatalf("relationships = %+v, want checksum", doc.Relationships)
+	}
+}
+
+func TestNewSystemGroupRelationshipDocumentRejectsRelationshipMappingFailure(t *testing.T) {
+	projection := repositorySystemGroupProjection()
+	projection.Relationships[0].Relationship = map[string]any{
+		"relation": func() {},
+	}
+
+	_, err := newSystemGroupRelationshipDocument(projection)
+	if err == nil {
+		t.Fatal("newSystemGroupRelationshipDocument error = nil, want mapping error")
+	}
+	if !strings.Contains(err.Error(), "marshal system group relationship") {
+		t.Fatalf("error = %q, want marshal system group relationship", err.Error())
 	}
 }
 
@@ -102,7 +121,11 @@ func TestSystemGroupRelationshipDocumentUsesPermissionJSONKeys(t *testing.T) {
 		},
 	}
 
-	data, err := bson.Marshal(newSystemGroupRelationshipDocument(projection))
+	doc, err := newSystemGroupRelationshipDocument(projection)
+	if err != nil {
+		t.Fatalf("newSystemGroupRelationshipDocument error = %v, want nil", err)
+	}
+	data, err := bson.Marshal(doc)
 	if err != nil {
 		t.Fatalf("Marshal error = %v, want nil", err)
 	}

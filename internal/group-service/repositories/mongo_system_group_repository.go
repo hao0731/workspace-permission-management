@@ -64,6 +64,11 @@ type systemGroupRelationshipCaveatDocument struct {
 }
 
 func (r *MongoGroupRepository) CreateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error) {
+	relationshipDoc, err := newSystemGroupRelationshipDocument(projection)
+	if err != nil {
+		return group.SystemGroup{}, err
+	}
+
 	session, err := r.client.StartSession()
 	if err != nil {
 		return group.SystemGroup{}, fmt.Errorf("start system group create session: %w", err)
@@ -74,7 +79,7 @@ func (r *MongoGroupRepository) CreateSystemGroup(ctx context.Context, model grou
 		if _, insertErr := r.systemGroups.InsertOne(sessionCtx, newSystemGroupDocument(model)); insertErr != nil {
 			return nil, fmt.Errorf("insert system group: %w", insertErr)
 		}
-		if _, insertErr := r.systemGroupRelationships.InsertOne(sessionCtx, newSystemGroupRelationshipDocument(projection)); insertErr != nil {
+		if _, insertErr := r.systemGroupRelationships.InsertOne(sessionCtx, relationshipDoc); insertErr != nil {
 			return nil, fmt.Errorf("insert system group relationships: %w", insertErr)
 		}
 		return nil, nil
@@ -174,11 +179,15 @@ func (d systemGroupDocument) toDomain() group.SystemGroup {
 	}
 }
 
-func newSystemGroupRelationshipDocument(model group.SystemGroupRelationshipProjection) systemGroupRelationshipDocument {
+func newSystemGroupRelationshipDocument(model group.SystemGroupRelationshipProjection) (systemGroupRelationshipDocument, error) {
 	relationships := make([]systemGroupRelationshipInfoDocument, 0, len(model.Relationships))
 	for _, relationship := range model.Relationships {
+		relationshipDoc, err := newSystemGroupRelationshipValueDocument(relationship.Relationship)
+		if err != nil {
+			return systemGroupRelationshipDocument{}, err
+		}
 		relationships = append(relationships, systemGroupRelationshipInfoDocument{
-			Relationship: newSystemGroupRelationshipValueDocument(relationship.Relationship),
+			Relationship: relationshipDoc,
 			Checksum:     relationship.Checksum,
 		})
 	}
@@ -188,19 +197,19 @@ func newSystemGroupRelationshipDocument(model group.SystemGroupRelationshipProje
 		Relationships: relationships,
 		CreatedAt:     model.CreatedAt,
 		UpdatedAt:     model.UpdatedAt,
-	}
+	}, nil
 }
 
-func newSystemGroupRelationshipValueDocument(relationship any) any {
+func newSystemGroupRelationshipValueDocument(relationship any) (systemGroupRelationshipValueDocument, error) {
 	data, err := json.Marshal(relationship)
 	if err != nil {
-		return relationship
+		return systemGroupRelationshipValueDocument{}, fmt.Errorf("marshal system group relationship: %w", err)
 	}
 	var document systemGroupRelationshipValueDocument
 	if err := json.Unmarshal(data, &document); err != nil {
-		return relationship
+		return systemGroupRelationshipValueDocument{}, fmt.Errorf("unmarshal system group relationship document: %w", err)
 	}
-	return document
+	return document, nil
 }
 
 func buildSystemGroupPage(docs []systemGroupDocument, limit int) group.SystemGroupPage {
