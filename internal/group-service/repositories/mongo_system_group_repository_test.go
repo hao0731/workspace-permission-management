@@ -76,6 +76,70 @@ func TestNewSystemGroupRelationshipDocumentMapping(t *testing.T) {
 	}
 }
 
+func TestSystemGroupRelationshipDocumentUsesPermissionJSONKeys(t *testing.T) {
+	subjectRelation := "internal_member"
+	projection := repositorySystemGroupProjection()
+	projection.Relationships[0].Relationship = systemGroupTestRelationship{
+		Relation: "checked_member",
+		Resource: systemGroupTestRelationshipObject{
+			ObjectID:   "group-1",
+			ObjectType: "group",
+		},
+		Subject: systemGroupTestRelationshipSubject{
+			Object: systemGroupTestRelationshipObject{
+				ObjectID:   "group-1",
+				ObjectType: "group",
+			},
+			Relation: &subjectRelation,
+		},
+		Caveat: &systemGroupTestRelationshipCaveat{
+			Name: "static_attributes_check",
+			Context: systemGroupTestRelationshipStaticAttributesContext{
+				AllowedTypes:       []string{"DL"},
+				AllowedLevels:      []string{"M2"},
+				IsContainSecretary: true,
+			},
+		},
+	}
+
+	data, err := bson.Marshal(newSystemGroupRelationshipDocument(projection))
+	if err != nil {
+		t.Fatalf("Marshal error = %v, want nil", err)
+	}
+	var raw bson.M
+	if err := bson.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal error = %v, want nil", err)
+	}
+	relationships := raw["relationship"].(bson.A)
+	info := bsonDocumentToMap(t, relationships[0])
+	relationshipBody := bsonDocumentToMap(t, info["relationship"])
+	resource := bsonDocumentToMap(t, relationshipBody["resource"])
+	if resource["object_id"] != "group-1" || resource["object_type"] != "group" {
+		t.Fatalf("resource = %#v, want JSON keys object_id/object_type", resource)
+	}
+	if _, ok := resource["objectid"]; ok {
+		t.Fatalf("resource has objectid key: %#v", resource)
+	}
+	subject := bsonDocumentToMap(t, relationshipBody["subject"])
+	if subject["optionalRelation"] != "internal_member" {
+		t.Fatalf("subject = %#v, want optionalRelation", subject)
+	}
+	caveat := bsonDocumentToMap(t, relationshipBody["optionalCaveat"])
+	if caveat["caveatName"] != "static_attributes_check" {
+		t.Fatalf("caveat = %#v, want caveatName", caveat)
+	}
+	context := bsonDocumentToMap(t, caveat["context"])
+	if _, ok := context["allowedtypes"]; ok {
+		t.Fatalf("context has allowedtypes key: %#v", context)
+	}
+	if _, ok := context["allowed_types"]; !ok {
+		t.Fatalf("context = %#v, want allowed_types", context)
+	}
+	if context["is_contain_secretary"] != true {
+		t.Fatalf("context = %#v, want is_contain_secretary true", context)
+	}
+}
+
 func TestSystemGroupIndexModels(t *testing.T) {
 	groupIndexes := systemGroupIndexModels()
 	if len(groupIndexes) != 1 {
@@ -163,4 +227,49 @@ func newIntegrationRepository(t *testing.T) *MongoGroupRepository {
 	t.Helper()
 	client, db := newIntegrationDatabase(t)
 	return NewMongoGroupRepository(client, db)
+}
+
+func bsonDocumentToMap(t *testing.T, value any) bson.M {
+	t.Helper()
+	switch typed := value.(type) {
+	case bson.M:
+		return typed
+	case bson.D:
+		out := bson.M{}
+		for _, element := range typed {
+			out[element.Key] = element.Value
+		}
+		return out
+	default:
+		t.Fatalf("value = %#v (%T), want BSON document", value, value)
+		return nil
+	}
+}
+
+type systemGroupTestRelationship struct {
+	Relation string                             `json:"relation"`
+	Resource systemGroupTestRelationshipObject  `json:"resource"`
+	Subject  systemGroupTestRelationshipSubject `json:"subject"`
+	Caveat   *systemGroupTestRelationshipCaveat `json:"optionalCaveat,omitempty"`
+}
+
+type systemGroupTestRelationshipObject struct {
+	ObjectID   string `json:"object_id"`
+	ObjectType string `json:"object_type"`
+}
+
+type systemGroupTestRelationshipSubject struct {
+	Object   systemGroupTestRelationshipObject `json:"object"`
+	Relation *string                           `json:"optionalRelation,omitempty"`
+}
+
+type systemGroupTestRelationshipCaveat struct {
+	Name    string                                             `json:"caveatName"`
+	Context systemGroupTestRelationshipStaticAttributesContext `json:"context"`
+}
+
+type systemGroupTestRelationshipStaticAttributesContext struct {
+	AllowedTypes       []string `json:"allowed_types"`
+	AllowedLevels      []string `json:"allowed_levels"`
+	IsContainSecretary bool     `json:"is_contain_secretary"`
 }

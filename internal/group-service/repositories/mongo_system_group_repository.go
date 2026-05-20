@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -38,6 +39,28 @@ type systemGroupRelationshipDocument struct {
 type systemGroupRelationshipInfoDocument struct {
 	Relationship any    `bson:"relationship"`
 	Checksum     string `bson:"checksum"`
+}
+
+type systemGroupRelationshipValueDocument struct {
+	Relation       string                                 `json:"relation" bson:"relation"`
+	Resource       systemGroupRelationshipObjectDocument  `json:"resource" bson:"resource"`
+	Subject        systemGroupRelationshipSubjectDocument `json:"subject" bson:"subject"`
+	OptionalCaveat *systemGroupRelationshipCaveatDocument `json:"optionalCaveat,omitempty" bson:"optionalCaveat,omitempty"`
+}
+
+type systemGroupRelationshipObjectDocument struct {
+	ObjectID   string `json:"object_id" bson:"object_id"`
+	ObjectType string `json:"object_type" bson:"object_type"`
+}
+
+type systemGroupRelationshipSubjectDocument struct {
+	Object           systemGroupRelationshipObjectDocument `json:"object" bson:"object"`
+	OptionalRelation *string                               `json:"optionalRelation,omitempty" bson:"optionalRelation,omitempty"`
+}
+
+type systemGroupRelationshipCaveatDocument struct {
+	CaveatName string         `json:"caveatName" bson:"caveatName"`
+	Context    map[string]any `json:"context" bson:"context"`
 }
 
 func (r *MongoGroupRepository) CreateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error) {
@@ -155,7 +178,7 @@ func newSystemGroupRelationshipDocument(model group.SystemGroupRelationshipProje
 	relationships := make([]systemGroupRelationshipInfoDocument, 0, len(model.Relationships))
 	for _, relationship := range model.Relationships {
 		relationships = append(relationships, systemGroupRelationshipInfoDocument{
-			Relationship: relationship.Relationship,
+			Relationship: newSystemGroupRelationshipValueDocument(relationship.Relationship),
 			Checksum:     relationship.Checksum,
 		})
 	}
@@ -166,6 +189,18 @@ func newSystemGroupRelationshipDocument(model group.SystemGroupRelationshipProje
 		CreatedAt:     model.CreatedAt,
 		UpdatedAt:     model.UpdatedAt,
 	}
+}
+
+func newSystemGroupRelationshipValueDocument(relationship any) any {
+	data, err := json.Marshal(relationship)
+	if err != nil {
+		return relationship
+	}
+	var document systemGroupRelationshipValueDocument
+	if err := json.Unmarshal(data, &document); err != nil {
+		return relationship
+	}
+	return document
 }
 
 func buildSystemGroupPage(docs []systemGroupDocument, limit int) group.SystemGroupPage {
