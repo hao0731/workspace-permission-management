@@ -25,6 +25,11 @@ import (
 
 type processIndicator struct{}
 
+type groupHTTPService struct {
+	*services.GroupService
+	*services.SystemGroupService
+}
+
 func (processIndicator) Name() string {
 	return "process"
 }
@@ -83,6 +88,11 @@ func run() error {
 		services.WithGroupExpiryBucketLocation(cfg.GroupExpiryCommand.BucketLocation),
 		services.WithIndividualMemberExpiryBucketLocation(cfg.IndividualMemberExpiryCommand.BucketLocation),
 	)
+	systemGroupService := services.NewSystemGroupService(repository)
+	httpService := groupHTTPService{
+		GroupService:       groupService,
+		SystemGroupService: systemGroupService,
+	}
 
 	eventHandler := handlers.NewGroupExpiryEventHandler(groupService, cfg.GroupExpiryCommand.Subject, logger)
 	consumer, err := eventbus.NewJetStreamConsumer(ctx, nc, newGroupExpiryEventbusConfig(cfg), eventHandler, logger)
@@ -97,7 +107,7 @@ func run() error {
 
 	e := echo.New()
 	registerHealthRoutes(e)
-	handlers.RegisterRoutes(e, handlers.NewGroupHandler(groupService, logger, pagination.New()))
+	handlers.RegisterRoutes(e, handlers.NewGroupHandler(httpService, logger, pagination.New()))
 
 	errCh := make(chan error, 3)
 	go func() {
