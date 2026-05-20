@@ -15,20 +15,26 @@ import (
 )
 
 const (
-	groupCollectionName                      = "groups"
-	groupIndividualMemberCollectionName      = "group_individual_members"
-	groupsActiveNameUniqueIndexName          = "groups_active_workspace_normalized_name_unique"
-	groupsWorkspaceCreatedIndexName          = "groups_workspace_created_id"
-	membersActiveGroupAccountUniqueIndexName = "group_individual_members_active_group_account_unique"
-	membersActiveUnexpiredGroupIndexName     = "group_individual_members_active_unexpired_group"
-	membersGroupCreatedIndexName             = "group_individual_members_group_created_id"
+	groupCollectionName                           = "groups"
+	groupIndividualMemberCollectionName           = "group_individual_members"
+	systemGroupCollectionName                     = "system_groups"
+	systemGroupRelationshipCollectionName         = "system_group_relationships"
+	groupsActiveNameUniqueIndexName               = "groups_active_workspace_normalized_name_unique"
+	groupsWorkspaceCreatedIndexName               = "groups_workspace_created_id"
+	membersActiveGroupAccountUniqueIndexName      = "group_individual_members_active_group_account_unique"
+	membersActiveUnexpiredGroupIndexName          = "group_individual_members_active_unexpired_group"
+	membersGroupCreatedIndexName                  = "group_individual_members_group_created_id"
+	systemGroupsSystemCreatedIndexName            = "system_groups_system_created_id"
+	systemGroupRelationshipsSystemGroupUniqueName = "system_group_relationships_system_group_unique"
 )
 
 type MongoGroupRepository struct {
-	client           *mongo.Client
-	groups           *mongo.Collection
-	members          *mongo.Collection
-	expiryRepository *sharedexpiry.MongoRepository
+	client                   *mongo.Client
+	groups                   *mongo.Collection
+	members                  *mongo.Collection
+	systemGroups             *mongo.Collection
+	systemGroupRelationships *mongo.Collection
+	expiryRepository         *sharedexpiry.MongoRepository
 }
 
 type groupDocument struct {
@@ -69,10 +75,12 @@ type individualMemberDocument struct {
 
 func NewMongoGroupRepository(client *mongo.Client, db *mongo.Database) *MongoGroupRepository {
 	return &MongoGroupRepository{
-		client:           client,
-		groups:           db.Collection(groupCollectionName),
-		members:          db.Collection(groupIndividualMemberCollectionName),
-		expiryRepository: sharedexpiry.NewMongoRepository(db),
+		client:                   client,
+		groups:                   db.Collection(groupCollectionName),
+		members:                  db.Collection(groupIndividualMemberCollectionName),
+		systemGroups:             db.Collection(systemGroupCollectionName),
+		systemGroupRelationships: db.Collection(systemGroupRelationshipCollectionName),
+		expiryRepository:         sharedexpiry.NewMongoRepository(db),
 	}
 }
 
@@ -82,6 +90,12 @@ func (r *MongoGroupRepository) EnsureIndexes(ctx context.Context) error {
 	}
 	if _, err := r.members.Indexes().CreateMany(ctx, individualMemberIndexModels()); err != nil {
 		return fmt.Errorf("create group individual member indexes: %w", err)
+	}
+	if _, err := r.systemGroups.Indexes().CreateMany(ctx, systemGroupIndexModels()); err != nil {
+		return fmt.Errorf("create system group indexes: %w", err)
+	}
+	if _, err := r.systemGroupRelationships.Indexes().CreateMany(ctx, systemGroupRelationshipIndexModels()); err != nil {
+		return fmt.Errorf("create system group relationship indexes: %w", err)
 	}
 	if err := r.expiryRepository.EnsureIndexes(ctx); err != nil {
 		return err

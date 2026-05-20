@@ -11,6 +11,7 @@ This document is the entry point for `group-service`. Endpoint-family details ar
 - [Group Expiry Command Design](group-service-group-expiry-command.md): grouping-rule expiry tasks, JetStream command contract, and idempotent command handling.
 - [Group Individual Member Expiry Command Design](group-service-individual-member-expiry-command.md): individual-member expiry tasks, JetStream command contract, and idempotent command handling.
 - [Group Expiry Scheduler Design](group-expiry-scheduler.md): independent scheduler service that scans expiry task collections and publishes the existing expiry command events.
+- [System Group API Design](system-group-api-design.md): system-scoped group creation, paginated system group list, and permission relationship projection persistence.
 
 Related context:
 
@@ -43,9 +44,12 @@ Policy alignment:
 - Persist explicit individual members in MongoDB collection `group_individual_members`.
 - Persist grouping-rule expiration tasks in MongoDB collection `group_expiry_task`.
 - Persist individual-member expiration tasks in MongoDB collection `individual_member_expiry_task`.
+- Persist system-scoped group definitions in MongoDB collection `system_groups`.
+- Persist system group permission relationship projections in MongoDB collection `system_group_relationships`.
 - Share expiry task collection schema, indexes, and query helpers through `internal/shared/repositories/expiry`.
 - Use soft deletion through `deleted_at` for both groups and individual members.
 - Keep create and delete operations that touch both collections atomic through MongoDB transactions.
+- Keep system group creation atomic across `system_groups` and `system_group_relationships` through MongoDB transactions.
 - Keep individual member add, expiration update, and delete workflows scoped to an active group and atomic through MongoDB transactions.
 - Keep grouping-rule creation, replacement, expiration task writes, and expiry command cleanup atomic through MongoDB transactions.
 - Keep individual-member creation, expiration update, expiration task writes, and expiry command cleanup atomic through MongoDB transactions.
@@ -67,6 +71,8 @@ Policy alignment:
 | `POST /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members` | [Group Individual Members API Design](group-service-individual-members.md#add-individual-members-api) | `201 Created` with added `members` | `404 Not Found` |
 | `PATCH /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account` | [Group Individual Members API Design](group-service-individual-members.md#update-individual-member-expiration-api) | `204 No Content` | `404 Not Found` |
 | `DELETE /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account` | [Group Individual Members API Design](group-service-individual-members.md#delete-individual-member-api) | `204 No Content` | `204 No Content` |
+| `POST /api/v1/systems/:system_id/groups` | [System Group API Design](system-group-api-design.md#create-system-group) | `201 Created` with the created system group payload | Not applicable |
+| `GET /api/v1/systems/:system_id/groups` | [System Group API Design](system-group-api-design.md#list-system-groups) | `200 OK` with `groups` and `page_info` | `200 OK` with an empty page |
 
 Common API conventions:
 
@@ -107,12 +113,14 @@ Alternatives considered:
 
 ## Common Persistence
 
-`group-service` owns four MongoDB collections:
+`group-service` owns six MongoDB collections:
 
 - `groups`: group definitions, display metadata, grouping rules, timestamps, and group soft-delete state. Details are in [Group API Design](group-service-group.md#groups-collection).
 - `group_individual_members`: explicit members assigned to groups, member expiration, timestamps, and member soft-delete state. Details are in [Group Individual Members API Design](group-service-individual-members.md#group_individual_members-collection).
 - `group_expiry_task`: the active outbox-like expiry task for each group that currently has dynamic grouping rules. Details are in [Group Expiry Command Design](group-service-group-expiry-command.md#group_expiry_task-collection).
 - `individual_member_expiry_task`: the active outbox-like expiry task for each active individual member. Details are in [Group Individual Member Expiry Command Design](group-service-individual-member-expiry-command.md#individual_member_expiry_task-collection).
+- `system_groups`: system-scoped group definitions. Details are in [System Group API Design](system-group-api-design.md#system_groups-collection).
+- `system_group_relationships`: generated permission relationship projections for system groups. Details are in [System Group API Design](system-group-api-design.md#system_group_relationships-collection).
 
 The expiry task collection schema, indexes, and task-specific query helpers are shared with `group-expiry-scheduler` through `internal/shared/repositories/expiry`. `group-service` still owns group and member write transactions and calls the shared expiry repository inside those transactions.
 
@@ -250,6 +258,8 @@ The implementation should keep `examples/api/groups.http` aligned with all group
 - Successful individual member add, expiration update, and idempotent delete.
 - Individual member add conflict and invalid expiration validation.
 
+The implementation should add `examples/api/system-groups.http` for system-scoped group APIs. It should include successful create, empty-rule create, paginated list, empty list, unsupported `not_eq`, duplicate `job_type`, invalid `limit`, and invalid `next_token` examples.
+
 ## Testing Strategy
 
 Detailed test expectations live with each split design:
@@ -258,6 +268,7 @@ Detailed test expectations live with each split design:
 - [Group Individual Members API Design](group-service-individual-members.md#testing-strategy)
 - [Group Expiry Command Design](group-service-group-expiry-command.md#testing-strategy)
 - [Group Individual Member Expiry Command Design](group-service-individual-member-expiry-command.md#testing-strategy)
+- [System Group API Design](system-group-api-design.md#testing-strategy)
 
 Repository-wide verification for implementation:
 

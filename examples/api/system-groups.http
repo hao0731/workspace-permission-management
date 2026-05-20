@@ -1,0 +1,96 @@
+@baseUrl = http://localhost:8081
+@systemId = todo
+@nextToken = replace-with-next-token
+
+### Create system group
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/groups
+Content-Type: application/json
+
+{
+  "name": "System Admins",
+  "grouping_rules": [
+    {
+      "attribute_key": "organization",
+      "operator": "eq",
+      "multi": true,
+      "value": ["ORG-100", "ORG-200"]
+    },
+    {
+      "attribute_key": "job_type",
+      "operator": "eq",
+      "multi": false,
+      "value": "DL"
+    },
+    {
+      "attribute_key": "job_level",
+      "operator": "eq",
+      "multi": false,
+      "value": "M2"
+    },
+    {
+      "attribute_key": "job_tag",
+      "operator": "eq",
+      "multi": true,
+      "value": ["a4_reviewer", "_internal_secretary_"]
+    }
+  ]
+}
+
+### Create system group with empty rules
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/groups
+Content-Type: application/json
+
+{
+  "name": "All Employees",
+  "grouping_rules": []
+}
+
+### List system groups
+GET {{baseUrl}}/api/v1/systems/{{systemId}}/groups?limit=20
+
+### List next page
+GET {{baseUrl}}/api/v1/systems/{{systemId}}/groups?limit=20&next_token={{nextToken}}
+
+### Validation error: not_eq is not supported in this phase
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Unsupported Operator",
+  "grouping_rules": [
+    {
+      "attribute_key": "organization",
+      "operator": "not_eq",
+      "multi": true,
+      "value": ["ORG-100"]
+    }
+  ]
+}
+
+### Validation error: duplicate job_type
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Duplicate Job Type",
+  "grouping_rules": [
+    {
+      "attribute_key": "job_type",
+      "operator": "eq",
+      "multi": false,
+      "value": "DL"
+    },
+    {
+      "attribute_key": "job_type",
+      "operator": "eq",
+      "multi": false,
+      "value": "IDL"
+    }
+  ]
+}
+
+### Validation error: invalid limit
+GET {{baseUrl}}/api/v1/systems/{{systemId}}/groups?limit=51
+
+### Validation error: invalid next_token
+GET {{baseUrl}}/api/v1/systems/{{systemId}}/groups?next_token=not-base64

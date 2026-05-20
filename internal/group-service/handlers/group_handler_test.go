@@ -16,27 +16,33 @@ import (
 )
 
 type fakeHTTPGroupService struct {
-	input           group.CreateInput
-	getQuery        group.GetQuery
-	deleteInput     group.DeleteInput
-	updateInput     group.UpdateGroupingRuleInput
-	listQuery       group.ListIndividualMembersQuery
-	addMembersInput group.AddIndividualMembersInput
-	memberUpdate    group.UpdateIndividualMemberExpirationInput
-	memberDelete    group.DeleteIndividualMemberInput
-	model           group.Group
-	groupPtr        *group.Group
-	page            group.IndividualMemberPage
-	addedMembers    []group.IndividualMember
-	err             error
-	calls           int
-	getCalls        int
-	deleteCalls     int
-	updateCalls     int
-	listCalls       int
-	memberAddCalls  int
-	memberUpdCalls  int
-	memberDelCalls  int
+	input             group.CreateInput
+	getQuery          group.GetQuery
+	deleteInput       group.DeleteInput
+	updateInput       group.UpdateGroupingRuleInput
+	listQuery         group.ListIndividualMembersQuery
+	addMembersInput   group.AddIndividualMembersInput
+	memberUpdate      group.UpdateIndividualMemberExpirationInput
+	memberDelete      group.DeleteIndividualMemberInput
+	systemGroupInput  group.SystemGroupCreateInput
+	systemGroupQuery  group.SystemGroupListQuery
+	model             group.Group
+	groupPtr          *group.Group
+	page              group.IndividualMemberPage
+	systemGroupModel  group.SystemGroup
+	systemGroupPage   group.SystemGroupPage
+	addedMembers      []group.IndividualMember
+	err               error
+	calls             int
+	getCalls          int
+	deleteCalls       int
+	updateCalls       int
+	listCalls         int
+	memberAddCalls    int
+	memberUpdCalls    int
+	memberDelCalls    int
+	systemCreateCalls int
+	systemListCalls   int
 }
 
 func (f *fakeHTTPGroupService) CreateGroup(ctx context.Context, input group.CreateInput) (group.Group, error) {
@@ -97,6 +103,24 @@ func (f *fakeHTTPGroupService) DeleteIndividualMember(ctx context.Context, input
 	f.memberDelCalls++
 	f.memberDelete = input
 	return f.err
+}
+
+func (f *fakeHTTPGroupService) CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, error) {
+	f.systemCreateCalls++
+	f.systemGroupInput = input
+	if f.err != nil {
+		return group.SystemGroup{}, f.err
+	}
+	return f.systemGroupModel, nil
+}
+
+func (f *fakeHTTPGroupService) ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error) {
+	f.systemListCalls++
+	f.systemGroupQuery = query
+	if f.err != nil {
+		return group.SystemGroupPage{}, f.err
+	}
+	return f.systemGroupPage, nil
 }
 
 func validGroupRequestBody() string {
@@ -484,5 +508,111 @@ func TestGroupHandlerDeleteIndividualMemberMissingReturnsNoContent(t *testing.T)
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+}
+
+func systemGroupHandlerModel() group.SystemGroup {
+	now := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	return group.SystemGroup{
+		ID:       "group-1",
+		SystemID: "system-a",
+		Name:     "System Admins",
+		GroupingRules: []group.SystemGroupRule{{
+			AttributeKey: group.GroupAttributeOrganization,
+			Operator:     group.OperatorEq,
+			Multi:        true,
+			Value:        []string{"ORG-100"},
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
+func validSystemGroupRequestBody() string {
+	return `{
+		"name": "System Admins",
+		"grouping_rules": [
+			{"attribute_key": "organization", "operator": "eq", "multi": true, "value": ["ORG-100"]}
+		]
+	}`
+}
+
+func TestGroupHandlerCreateSystemGroup(t *testing.T) {
+	service := &fakeHTTPGroupService{systemGroupModel: systemGroupHandlerModel()}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/systems/system-a/groups", strings.NewReader(validSystemGroupRequestBody()))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if service.systemCreateCalls != 1 || service.systemGroupInput.SystemID != "system-a" {
+		t.Fatalf("service calls/input = %d/%+v, want system create", service.systemCreateCalls, service.systemGroupInput)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := body["group"]; !ok {
+		t.Fatal("response missing group")
+	}
+}
+
+func TestGroupHandlerCreateSystemGroupValidationError(t *testing.T) {
+	service := &fakeHTTPGroupService{err: group.ErrInvalidInput}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/systems/system-a/groups", strings.NewReader(validSystemGroupRequestBody()))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestGroupHandlerListSystemGroups(t *testing.T) {
+	service := &fakeHTTPGroupService{systemGroupPage: group.SystemGroupPage{Groups: []group.SystemGroup{systemGroupHandlerModel()}}}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/systems/system-a/groups?limit=10", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if service.systemListCalls != 1 || service.systemGroupQuery.SystemID != "system-a" || service.systemGroupQuery.Limit != 10 {
+		t.Fatalf("query = %+v, want system-a limit 10", service.systemGroupQuery)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := body["groups"]; !ok {
+		t.Fatal("response missing groups")
+	}
+}
+
+func TestGroupHandlerListSystemGroupsInvalidLimit(t *testing.T) {
+	service := &fakeHTTPGroupService{}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/systems/system-a/groups?limit=51", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if service.systemListCalls != 0 {
+		t.Fatalf("service calls = %d, want 0", service.systemListCalls)
 	}
 }

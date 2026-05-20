@@ -22,6 +22,8 @@ type HTTPGroupService interface {
 	AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error)
 	UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput) error
 	DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput) error
+	CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, error)
+	ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error)
 }
 
 type GroupHandler struct {
@@ -48,6 +50,8 @@ func RegisterRoutes(e *echo.Echo, handler *GroupHandler) {
 	e.POST("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members", handler.AddIndividualMembers)
 	e.PATCH("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account", handler.UpdateIndividualMemberExpiration)
 	e.DELETE("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account", handler.DeleteIndividualMember)
+	e.POST("/api/v1/systems/:system_id/groups", handler.CreateSystemGroup)
+	e.GET("/api/v1/systems/:system_id/groups", handler.ListSystemGroups)
 }
 
 func newGroupPathParams(c *echo.Context) groupPathParams {
@@ -80,6 +84,30 @@ func (h *GroupHandler) CreateGroup(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	return c.JSON(http.StatusCreated, transport.NewGroupCreateResponse(model))
+}
+
+func (h *GroupHandler) CreateSystemGroup(c *echo.Context) error {
+	systemID := c.Param("system_id")
+	request, err := transport.DecodeSystemGroupCreateRequest(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError("request body must be valid JSON"))
+	}
+	input, err := request.ToDomain(systemID)
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		return c.JSON(http.StatusBadRequest, validationError("request body is invalid"))
+	}
+	model, err := h.service.CreateSystemGroup(c.Request().Context(), input)
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to create system group", "err", err, "system_id", systemID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.JSON(http.StatusCreated, transport.NewSystemGroupCreateResponse(model))
 }
 
 func (h *GroupHandler) GetGroup(c *echo.Context) error {
@@ -168,6 +196,39 @@ func (h *GroupHandler) ListIndividualMembers(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}
 	response, err := transport.NewIndividualMemberListResponse(page)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *GroupHandler) ListSystemGroups(c *echo.Context) error {
+	systemID := c.Param("system_id")
+	limit, err := h.paginationHelper.ParseLimit(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	token, err := h.paginationHelper.ParseToken(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	cursor, err := transport.DecodeSystemGroupNextToken(token)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+	}
+	page, err := h.service.ListSystemGroups(c.Request().Context(), group.SystemGroupListQuery{
+		SystemID: systemID,
+		Limit:    limit,
+		Cursor:   cursor,
+	})
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		h.logger.Warn("failed to list system groups", "err", err, "system_id", systemID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	response, err := transport.NewSystemGroupListResponse(page)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
 	}

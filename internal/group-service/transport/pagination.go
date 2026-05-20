@@ -19,27 +19,42 @@ func EncodeIndividualMemberNextToken(cursor *group.IndividualMemberCursor) (stri
 	if cursor == nil {
 		return "", nil
 	}
+	return encodeCreatedAtIDNextToken(cursor.CreatedAt, cursor.ID)
+}
+
+func DecodeIndividualMemberNextToken(token string) (*group.IndividualMemberCursor, error) {
+	createdAt, id, err := decodeCreatedAtIDNextToken(token)
+	if err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, nil
+	}
+	return &group.IndividualMemberCursor{CreatedAt: createdAt, ID: id}, nil
+}
+
+func encodeCreatedAtIDNextToken(createdAt time.Time, id string) (string, error) {
 	payload := individualMemberNextTokenPayload{
-		CreatedAt: cursor.CreatedAt.UTC().Format(time.RFC3339Nano),
-		ID:        cursor.ID,
+		CreatedAt: createdAt.UTC().Format(time.RFC3339Nano),
+		ID:        id,
 	}
 	return pagination.EncodeNextToken(payload)
 }
 
-func DecodeIndividualMemberNextToken(token string) (*group.IndividualMemberCursor, error) {
+func decodeCreatedAtIDNextToken(token string) (time.Time, string, error) {
 	payload, err := pagination.DecodeNextToken[individualMemberNextTokenPayload](token)
 	if err != nil {
 		if errors.Is(err, pagination.ErrEmptyToken) {
-			return nil, nil
+			return time.Time{}, "", nil
 		}
-		return nil, err
+		return time.Time{}, "", err
 	}
 	if strings.TrimSpace(payload.ID) == "" {
-		return nil, fmt.Errorf("next_token.id is required")
+		return time.Time{}, "", fmt.Errorf("next_token.id is required")
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, payload.CreatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("next_token.created_at must be RFC3339 timestamp")
+		return time.Time{}, "", fmt.Errorf("next_token.created_at must be RFC3339 timestamp")
 	}
-	return &group.IndividualMemberCursor{CreatedAt: createdAt, ID: strings.TrimSpace(payload.ID)}, nil
+	return createdAt, strings.TrimSpace(payload.ID), nil
 }
