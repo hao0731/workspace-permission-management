@@ -1,0 +1,166 @@
+package repositories
+
+import (
+	"context"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
+
+func repositorySystemGroup() group.SystemGroup {
+	now := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	return group.SystemGroup{
+		ID:       "group-1",
+		SystemID: "system-a",
+		Name:     "System Admins",
+		GroupingRules: []group.SystemGroupRule{{
+			AttributeKey: group.GroupAttributeOrganization,
+			Operator:     group.OperatorEq,
+			Multi:        true,
+			Value:        []string{"ORG-100", "ORG-200"},
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
+func repositorySystemGroupProjection() group.SystemGroupRelationshipProjection {
+	now := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	return group.SystemGroupRelationshipProjection{
+		SystemID: "system-a",
+		GroupID:  "group-1",
+		Relationships: []group.RelationshipInfo{{
+			Relationship: map[string]any{"relation": "hr_member"},
+			Checksum:     "checksum-1",
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
+func TestNewSystemGroupDocumentMapping(t *testing.T) {
+	doc := newSystemGroupDocument(repositorySystemGroup())
+	if doc.ID != "group-1" || doc.SystemID != "system-a" || doc.Name != "System Admins" {
+		t.Fatalf("doc = %+v, want identity/name copied", doc)
+	}
+	model := doc.toDomain()
+	if model.ID != "group-1" || model.GroupingRules[0].AttributeKey != group.GroupAttributeOrganization {
+		t.Fatalf("model = %+v, want domain mapping", model)
+	}
+}
+
+func TestSystemGroupDocumentToDomainConvertsBSONArrays(t *testing.T) {
+	doc := newSystemGroupDocument(repositorySystemGroup())
+	doc.GroupingRules[0].Value = bson.A{"ORG-100", "ORG-200"}
+
+	model := doc.toDomain()
+	values, ok := model.GroupingRules[0].Value.([]string)
+	if !ok {
+		t.Fatalf("value type = %T, want []string", model.GroupingRules[0].Value)
+	}
+	if !reflect.DeepEqual(values, []string{"ORG-100", "ORG-200"}) {
+		t.Fatalf("values = %#v, want ORG-100/ORG-200", values)
+	}
+}
+
+func TestNewSystemGroupRelationshipDocumentMapping(t *testing.T) {
+	doc := newSystemGroupRelationshipDocument(repositorySystemGroupProjection())
+	if doc.SystemID != "system-a" || doc.GroupID != "group-1" {
+		t.Fatalf("doc = %+v, want projection identity", doc)
+	}
+	if len(doc.Relationships) != 1 || doc.Relationships[0].Checksum != "checksum-1" {
+		t.Fatalf("relationships = %+v, want checksum", doc.Relationships)
+	}
+}
+
+func TestSystemGroupIndexModels(t *testing.T) {
+	groupIndexes := systemGroupIndexModels()
+	if len(groupIndexes) != 1 {
+		t.Fatalf("system group indexes len = %d, want 1", len(groupIndexes))
+	}
+	if *indexOptions(t, groupIndexes[0]).Name != systemGroupsSystemCreatedIndexName {
+		t.Fatalf("index name = %q, want %q", *indexOptions(t, groupIndexes[0]).Name, systemGroupsSystemCreatedIndexName)
+	}
+
+	relationshipIndexes := systemGroupRelationshipIndexModels()
+	if len(relationshipIndexes) != 1 {
+		t.Fatalf("relationship indexes len = %d, want 1", len(relationshipIndexes))
+	}
+	options := indexOptions(t, relationshipIndexes[0])
+	if options.Unique == nil || !*options.Unique {
+		t.Fatal("relationship unique index Unique = false, want true")
+	}
+}
+
+func TestBuildSystemGroupListFilter(t *testing.T) {
+	cursorTime := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	filter := buildSystemGroupListFilter(group.SystemGroupListQuery{
+		SystemID: "system-a",
+		Cursor:   &group.SystemGroupCursor{CreatedAt: cursorTime, ID: "group-9"},
+	})
+	want := bson.M{
+		"system_id": "system-a",
+		"$or": bson.A{
+			bson.M{"created_at": bson.M{"$lt": cursorTime}},
+			bson.M{"created_at": cursorTime, "_id": bson.M{"$lt": "group-9"}},
+		},
+	}
+	if !reflect.DeepEqual(filter, want) {
+		t.Fatalf("filter = %#v, want %#v", filter, want)
+	}
+}
+
+func TestBuildSystemGroupPage(t *testing.T) {
+	now := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	page := buildSystemGroupPage([]systemGroupDocument{
+		{ID: "group-1", SystemID: "system-a", Name: "One", CreatedAt: now, UpdatedAt: now},
+		{ID: "group-2", SystemID: "system-a", Name: "Two", CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+	}, 1)
+	if !page.HasNextPage || len(page.Groups) != 1 {
+		t.Fatalf("page = %+v, want one item with next page", page)
+	}
+	if page.NextCursor == nil || page.NextCursor.ID != "group-1" {
+		t.Fatalf("next cursor = %+v, want group-1", page.NextCursor)
+	}
+}
+
+func TestMongoGroupRepositoryCreateAndListSystemGroupsIntegration(t *testing.T) {
+	ctx := context.Background()
+	repository := newIntegrationRepository(t)
+	if err := repository.EnsureIndexes(ctx); err != nil {
+		t.Fatalf("EnsureIndexes error = %v", err)
+	}
+
+	model := repositorySystemGroup()
+	projection := repositorySystemGroupProjection()
+	saved, err := repository.CreateSystemGroup(ctx, model, projection)
+	if err != nil {
+		t.Fatalf("CreateSystemGroup error = %v", err)
+	}
+	if saved.ID != model.ID {
+		t.Fatalf("saved ID = %q, want %q", saved.ID, model.ID)
+	}
+	page, err := repository.ListSystemGroups(ctx, group.SystemGroupListQuery{SystemID: "system-a", Limit: 20})
+	if err != nil {
+		t.Fatalf("ListSystemGroups error = %v", err)
+	}
+	if len(page.Groups) != 1 || page.Groups[0].ID != "group-1" {
+		t.Fatalf("page = %+v, want group-1", page)
+	}
+	count, err := repository.systemGroupRelationships.CountDocuments(ctx, bson.M{"system_id": "system-a", "group_id": "group-1"})
+	if err != nil {
+		t.Fatalf("count relationships: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("relationship docs = %d, want 1", count)
+	}
+}
+
+func newIntegrationRepository(t *testing.T) *MongoGroupRepository {
+	t.Helper()
+	client, db := newIntegrationDatabase(t)
+	return NewMongoGroupRepository(client, db)
+}
