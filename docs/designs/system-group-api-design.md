@@ -10,7 +10,7 @@ Related designs:
 
 - [Group Service Design](group-service.md): entry design for `group-service`.
 - [Function Service System Resource API Design](function-service-system-resource-api-design.md): existing system-scoped API conventions and `system_id` validation.
-- [Permission API Client Design](permission-api-client-design.md): shared permission API DTO package that defines relationship helper constructors.
+- [Permission API Client Design](permission-api-client-design.md): shared permission package that defines relationship helper constructors.
 
 ## Classification and Policies
 
@@ -27,7 +27,7 @@ Policy alignment:
 - Handlers remain thin and only parse path, query, and body input, invoke services, and render mapped responses or errors.
 - Request and response DTOs belong in `internal/group-service/transport`.
 - System group validation and normalized rule models belong in `internal/domain/group` and stay independent of Echo and MongoDB.
-- Relationship projection building belongs in `internal/group-service/services`; it may use `internal/shared/interactions/permission/api/relationship` helper constructors, but domain types must not import the permission API package.
+- Relationship projection building belongs in `internal/group-service/services`; it may use `internal/shared/interactions/permission/relationship` helper constructors, but domain types must not import the permission package.
 - MongoDB access and transactions remain isolated in `internal/group-service/repositories`.
 - The `system_groups` collection name follows the requested persistence contract. Go constants should isolate the literal collection name so code identifiers remain idiomatic.
 - This design document is stored under `docs/designs/` and linked from the existing `group-service` entry design.
@@ -311,7 +311,7 @@ The `_internal_secretary_` value is the only special sentinel. It is recognized 
 
 ## Relationship Generation
 
-The service converts accepted `grouping_rules` into `internal/shared/interactions/permission/api/relationship.Relationship` values before persistence.
+The service converts accepted `grouping_rules` into `internal/shared/interactions/permission/relationship.Relationship` values before persistence.
 
 Generation inputs:
 

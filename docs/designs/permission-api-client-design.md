@@ -2,14 +2,13 @@
 
 ## Background
 
-`function-service` currently registers derived system resource attributes through the shared permission client boundary. The first implementation used an in-memory client so the workflow could be integrated before a real permission API existed.
+`function-service` registers derived system resource attributes through a consumer-side permission registration interface owned by `internal/function-service/services`. The concrete HTTP client sends the complete derived resource attribute set to a permission API at `POST /api/v1/schema/write`.
 
-This design adds the HTTP API client implementation for that same boundary. The API client sends the complete derived resource attribute set to a permission API at `POST /api/v1/schema/write`. Local development uses a lightweight `mock-permission-api` service that logs received payloads and returns success.
+Local development uses a lightweight `mock-permission-api` service that logs received payloads and returns success. The mock uses the same request and error DTOs as the client so local tests detect payload drift.
 
 Related designs:
 
-- [Permission Client Design](permission-client-design.md)
-- [In-Memory Permission Client Design](inmemory-permission-client-design.md)
+- [Permission Registration Consumer Interface Design](permission-client-design.md)
 - [Function Service System Resource API Design](function-service-system-resource-api-design.md)
 
 ## Classification and Policies
@@ -23,32 +22,32 @@ Required policies:
 
 Policy alignment:
 
-- The shared `permission.Client` interface remains the service-facing contract under `internal/shared/interactions/permission`.
-- HTTP transport details live in `internal/shared/interactions/permission/api`, behind the shared client boundary.
-- `function-service` services continue to depend only on the shared interface and domain resource types, not HTTP client details or remote API DTOs.
-- `cmd/function-service/main.go` remains the composition root that wires config and concrete clients.
+- `internal/function-service/services.PermissionClient` is the service-facing contract.
+- HTTP transport details live in `internal/shared/interactions/permission`.
+- `function-service` services continue to depend on their consumer-side interface and domain resource types, not HTTP client details or remote API DTOs.
+- `cmd/function-service/main.go` remains the composition root that wires config and the concrete client.
 - The mock permission API follows the backend service layout and keeps Echo request handling in handlers.
 - The remote permission API JSON field names intentionally follow the external contract (`resAttr`, `isPublic`) even though new internal APIs normally prefer `snake_case`.
-- This design is stored under `docs/designs/` and cross-linked from the affected permission client design.
+- This design is stored under `docs/designs/` and cross-linked from the affected permission registration design.
 
 ## Goals
 
-- Add `internal/shared/interactions/permission/api`.
-- Implement `internal/shared/interactions/permission/client.go`'s `Client` interface with an HTTP API client.
+- Use `internal/shared/interactions/permission` as the concrete HTTP permission API package.
+- Implement `RegisterResourceAttributes` so `*permission.Client` satisfies `services.PermissionClient`.
 - Construct the API client with `baseURL`, `apiKey`, and the API key header name.
 - Send all API requests with:
   - `Content-Type: application/json`
   - `<apiKeyHeaderKey>: <apiKey>`
 - Implement `RegisterResourceAttributes` by sending `POST <baseURL>/api/v1/schema/write`.
-- Put request DTOs in `internal/shared/interactions/permission/api/request.go`.
-- Put API error response DTOs and client error types in `internal/shared/interactions/permission/api/errors.go`.
-- Add a `mock-permission-api` service that implements `POST /api/v1/schema/write`, logs the received payload, and returns `200 OK`.
-- Replace the current `function-service` in-memory permission client wiring with the API client.
-- Keep `SystemResourceService` and handler behavior unchanged except for the concrete client wiring.
+- Put request DTOs in `internal/shared/interactions/permission/request.go`.
+- Put API error response DTOs and client error types in `internal/shared/interactions/permission/errors.go`.
+- Keep relationship helper packages directly under `internal/shared/interactions/permission`.
+- Keep `mock-permission-api` implementing `POST /api/v1/schema/write`, logging the received payload, and returning `200 OK`.
+- Keep `SystemResourceService` and handler behavior unchanged except for the package boundary and concrete client wiring.
 
 ## Non-Goals
 
-- Do not change the `permission.Client` method signature.
+- Do not change the `services.PermissionClient` method signature.
 - Do not make `condition` or `isPublic` caller-configurable in this phase.
 - Do not add retry, outbox, circuit breaker, or background delivery behavior.
 - Do not persist received payloads in `mock-permission-api`.
@@ -57,13 +56,18 @@ Policy alignment:
 
 ## Package Structure
 
-Expected additions:
+Expected shared package layout:
 
 ```txt
-internal/shared/interactions/permission/api/
+internal/shared/interactions/permission/
   client.go
   request.go
   errors.go
+  caveat/
+  object/
+  relation/
+  relationship/
+  subject/
 
 cmd/mock-permission-api/
   main.go
@@ -75,27 +79,28 @@ internal/mock-permission-api/
 
 Responsibilities:
 
-- `internal/shared/interactions/permission/api/client.go`: concrete HTTP client, request construction, headers, response status handling, and JSON encoding/decoding.
-- `internal/shared/interactions/permission/api/request.go`: remote schema-write request DTOs.
-- `internal/shared/interactions/permission/api/errors.go`: remote error response DTO and exported client error type for non-2xx responses.
+- `internal/shared/interactions/permission/client.go`: concrete HTTP client, request construction, headers, response status handling, and JSON encoding/decoding.
+- `internal/shared/interactions/permission/request.go`: remote schema-write request DTOs.
+- `internal/shared/interactions/permission/errors.go`: remote error response DTO and exported client error type for non-2xx responses.
+- `internal/shared/interactions/permission/caveat`, `object`, `relation`, `relationship`, and `subject`: shared permission relationship DTOs and helper constructors.
 - `internal/mock-permission-api/config`: environment-based HTTP address, environment, and shutdown timeout config.
 - `internal/mock-permission-api/handlers`: Echo route registration, body decode/logging, and response rendering.
 - `cmd/mock-permission-api/main.go`: composition root, logger setup, health routes, route registration, server start, and graceful shutdown.
 
-No package under `internal/shared/interactions/permission/api` may import `internal/function-service` or `internal/mock-permission-api`.
+No package under `internal/shared/interactions/permission` may import `internal/function-service`, `internal/group-service`, or `internal/mock-permission-api`.
 
 ## Client Contract
 
 Package path:
 
 ```txt
-internal/shared/interactions/permission/api
+internal/shared/interactions/permission
 ```
 
 Constructor:
 
 ```go
-func New(baseURL string, apiKey string, apiKeyHeaderKey string, opts ...Option) permission.Client
+func New(baseURL string, apiKey string, apiKeyHeaderKey string, opts ...Option) *Client
 ```
 
 Recommended test option:
@@ -118,7 +123,7 @@ Behavior:
 File:
 
 ```txt
-internal/shared/interactions/permission/api/request.go
+internal/shared/interactions/permission/request.go
 ```
 
 Types:
@@ -136,7 +141,7 @@ type RegisterResourceAttributesRequest struct {
 }
 ```
 
-Mapping from the shared client method:
+Mapping from the consumer-side method:
 
 ```go
 RegisterResourceAttributes(ctx context.Context, systemID string, resourceAttributes []resource.ResourceAttribute) error
@@ -200,7 +205,7 @@ Failure behavior:
 File:
 
 ```txt
-internal/shared/interactions/permission/api/errors.go
+internal/shared/interactions/permission/errors.go
 ```
 
 Remote error response:
@@ -230,7 +235,7 @@ The permission API error shape is intentionally separate from `internal/shared/h
 
 ## Function Service Configuration And Wiring
 
-Add required config values:
+Required config values:
 
 - `FUNCTION_SERVICE_PERMISSION_API_BASE_URL`
 - `FUNCTION_SERVICE_PERMISSION_API_KEY`
@@ -250,17 +255,17 @@ FUNCTION_SERVICE_PERMISSION_API_KEY=dev-permission-api-key
 FUNCTION_SERVICE_PERMISSION_API_KEY_HEADER=X-API-Key
 ```
 
-`cmd/function-service/main.go` should replace the current in-memory wiring:
+`cmd/function-service/main.go` should wire the root permission API client:
 
 ```go
-permissionClient := permissionapi.New(
+permissionClient := permission.New(
 	cfg.PermissionAPI.BaseURL,
 	cfg.PermissionAPI.APIKey,
 	cfg.PermissionAPI.APIKeyHeader,
 )
 ```
 
-`SystemResourceService` keeps the same dependency:
+`SystemResourceService` keeps a dependency on its consumer-side interface:
 
 ```go
 services.NewSystemResourceService(systemResourceRepository, limits, permissionClient, ...)
@@ -303,7 +308,7 @@ POST /api/v1/schema/write
 
 Behavior:
 
-- Decode the request body into `api.RegisterResourceAttributesRequest`.
+- Decode the request body into `permission.RegisterResourceAttributesRequest`.
 - Log the payload through `slog.InfoContext`.
 - Return `200 OK`.
 - Do not persist the request.
@@ -337,25 +342,25 @@ MOCK_PERMISSION_API_HTTP_ADDR: :8086
 
 ## API Example
 
-Add a REST Client example:
+REST Client example:
 
 ```txt
 examples/api/mock_permission_api.http
 ```
 
-The file should include:
+The file includes:
 
 - `@baseUrl = http://localhost:8086`
 - `@apiKey = dev-permission-api-key`
 - A success request for `POST /api/v1/schema/write`
 - The configured API key header
-- A malformed JSON example if the mock implementation returns validation errors
+- A malformed JSON example because the mock implementation returns validation errors
 
 ## Testing Strategy
 
 API client tests:
 
-- Compile-time assertion that `api.Client` implements `permission.Client`.
+- Compile-time method-shape assertion that `*permission.Client` has `RegisterResourceAttributes`.
 - Constructor trims `baseURL` trailing slash.
 - `RegisterResourceAttributes` sends `POST /api/v1/schema/write`.
 - Request includes `Content-Type: application/json`.
@@ -372,7 +377,8 @@ Function-service config and wiring tests:
 
 - Config loads and validates the three permission API settings.
 - Missing or blank permission API settings fail startup.
-- `cmd/function-service/main.go` wires `permissionapi.New`, not `permissioninmemory.New`.
+- `cmd/function-service/main.go` wires `permission.New`.
+- The returned concrete client satisfies `services.PermissionClient` by method shape.
 
 Mock permission API tests:
 
@@ -389,21 +395,21 @@ go test ./...
 
 ## Architecture Decisions
 
-1. Keep the shared `permission.Client` interface unchanged.
-   - Rationale: `function-service` already supplies all data needed by the current remote API when `definition` maps to `systemID` and relation metadata is fixed.
-   - Trade-off: If future permission schema writes need per-relation conditions or visibility, the interface will need a new input model.
+1. Return the concrete `*Client` from the permission API package constructor.
+   - Rationale: The service-facing interface is now owned by `internal/function-service/services`, and the shared package should expose its concrete implementation directly.
+   - Trade-off: Consumers that want an abstraction must define their own narrow interface.
 
-2. Put the HTTP implementation in `internal/shared/interactions/permission/api`.
+2. Put the HTTP implementation in `internal/shared/interactions/permission`.
    - Rationale: The API client is a reusable shared interaction implementation and should stay out of service-specific packages.
-   - Trade-off: The package owns remote DTOs that are not used by domain logic, so callers must continue depending on the shared interface rather than these transport types.
+   - Trade-off: The package owns remote DTOs that are not used by domain logic, so callers must continue depending on consumer-side interfaces rather than these transport types.
 
 3. Decode remote non-2xx bodies into the permission API error shape.
    - Rationale: This preserves remote error details for logs and tests without leaking remote error decisions into `function-service` handlers.
    - Trade-off: The service still maps all registration failures to the same `502 permission_registration_failed` response.
 
-4. Use a mock permission API instead of extending the in-memory client for local development.
+4. Use a mock permission API for local development.
    - Rationale: The mock exercises real HTTP request construction, headers, and payload shape while keeping local setup deterministic.
-   - Trade-off: Local development now needs one more process when exercising the full function-service registration path.
+   - Trade-off: Local development needs one extra process when exercising the full function-service registration path.
 
 5. Keep registration synchronous.
    - Rationale: This preserves the existing post-commit behavior and HTTP response semantics.
