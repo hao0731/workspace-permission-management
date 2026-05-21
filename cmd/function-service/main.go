@@ -22,8 +22,7 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/function-service/transport"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 	"github.com/hao0731/workspace-permission-management/internal/shared/health"
-	clientpermission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
-	permissionapi "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api"
+	permission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
 	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 )
@@ -38,8 +37,8 @@ func (processIndicator) IsHealthy(context.Context) bool {
 	return true
 }
 
-func newPermissionClient(cfg config.PermissionAPIConfig) clientpermission.Client {
-	return permissionapi.New(cfg.BaseURL, cfg.APIKey, cfg.APIKeyHeader)
+func newPermissionClient(cfg config.PermissionAPIConfig) *permission.Client {
+	return permission.New(cfg.BaseURL, cfg.APIKey, cfg.APIKeyHeader)
 }
 
 func main() {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	permissionapi "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api"
+	permission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 )
 
 type SchemaHandler struct {
@@ -26,9 +26,9 @@ func RegisterRoutes(e *echo.Echo, handler *SchemaHandler) {
 }
 
 func (h *SchemaHandler) WriteSchema(c *echo.Context) error {
-	var request permissionapi.RegisterResourceAttributesRequest
+	var request permission.RegisterResourceAttributesRequest
 	if err := json.NewDecoder(c.Request().Body).Decode(&request); err != nil {
-		return c.JSON(http.StatusBadRequest, permissionapi.ErrorResponse{
+		return c.JSON(http.StatusBadRequest, permission.ErrorResponse{
 			Code:    http.StatusBadRequest,
 			Error:   "validation_failed",
 			Message: "Invalid schema write payload",

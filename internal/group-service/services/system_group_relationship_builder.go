@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
-	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/caveat"
-	permissionrelationship "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/relationship"
+	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/caveat"
+	permissionrelationship "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/relationship"
 )
 
 func buildSystemGroupRelationshipProjection(systemID string, groupID string, rules []group.SystemGroupRule, now time.Time) (group.SystemGroupRelationshipProjection, error) {

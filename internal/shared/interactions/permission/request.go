@@ -1,4 +1,4 @@
-package api
+package permission
 
 import "github.com/hao0731/workspace-permission-management/internal/domain/resource"
 
