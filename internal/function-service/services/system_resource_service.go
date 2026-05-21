@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
-	clientpermission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 )
 
 var ErrPermissionRegistrationFailed = errors.New("permission registration failed")
@@ -22,6 +21,10 @@ type SystemResourceRepository interface {
 	UpsertResourceDefinitions(ctx context.Context, definitions []resource.ResourceDefinition) ([]resource.ResourceDefinition, error)
 	UpsertResourceAttributes(ctx context.Context, attributes resource.ResourceAttributes) (resource.ResourceAttributes, error)
 	GetResourceAttributes(ctx context.Context, query resource.ResourceAttributesQuery) (resource.ResourceAttributes, bool, error)
+}
+
+type PermissionClient interface {
+	RegisterResourceAttributes(ctx context.Context, systemID string, resourceAttributes []resource.ResourceAttribute) error
 }
 
 type SystemResourceOption func(*SystemResourceService)
@@ -53,13 +56,13 @@ func WithSystemResourceLogger(logger *slog.Logger) SystemResourceOption {
 type SystemResourceService struct {
 	repository       SystemResourceRepository
 	limits           resource.ResourceDefinitionLimits
-	permissionClient clientpermission.Client
+	permissionClient PermissionClient
 	clock            func() time.Time
 	idGenerator      func() string
 	logger           *slog.Logger
 }
 
-func NewSystemResourceService(repository SystemResourceRepository, limits resource.ResourceDefinitionLimits, permissionClient clientpermission.Client, opts ...SystemResourceOption) *SystemResourceService {
+func NewSystemResourceService(repository SystemResourceRepository, limits resource.ResourceDefinitionLimits, permissionClient PermissionClient, opts ...SystemResourceOption) *SystemResourceService {
 	service := &SystemResourceService{
 		repository:       repository,
 		limits:           limits,

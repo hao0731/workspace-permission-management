@@ -1,4 +1,4 @@
-package api
+package permission
 
 import (
 	"context"
@@ -10,10 +10,13 @@ import (
 	"testing"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/resource"
-	clientpermission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 )
 
-var _ clientpermission.Client = (*Client)(nil)
+type resourceAttributeRegistrar interface {
+	RegisterResourceAttributes(ctx context.Context, systemID string, resourceAttributes []resource.ResourceAttribute) error
+}
+
+var _ resourceAttributeRegistrar = (*Client)(nil)
 
 func TestClientRegisterResourceAttributesSendsSchemaWriteRequest(t *testing.T) {
 	var gotMethod string

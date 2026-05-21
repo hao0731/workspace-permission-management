@@ -92,6 +92,8 @@ func (f *fakePermissionClient) RegisterResourceAttributes(ctx context.Context, s
 	return f.err
 }
 
+var _ PermissionClient = (*fakePermissionClient)(nil)
+
 func TestSystemResourceServiceSaveSystemResources(t *testing.T) {
 	now := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	repo := &fakeSystemResourceRepository{

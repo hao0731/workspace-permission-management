@@ -1,10 +1,10 @@
 package relationship
 
 import (
-	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/caveat"
-	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/object"
-	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/relation"
-	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/subject"
+	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/caveat"
+	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/object"
+	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/relation"
+	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/subject"
 )
 
 type Relationship struct {

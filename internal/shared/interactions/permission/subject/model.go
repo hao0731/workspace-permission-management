@@ -1,8 +1,8 @@
 package subject
 
 import (
-	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/object"
-	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api/relation"
+	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/object"
+	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/relation"
 )
 
 type Subject struct {

@@ -13,7 +13,6 @@ import (
 	functionconfig "github.com/hao0731/workspace-permission-management/internal/function-service/config"
 	"github.com/hao0731/workspace-permission-management/internal/shared/environment"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
-	permissionapi "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/api"
 	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
 )
 
@@ -61,8 +60,8 @@ func TestNewPermissionClientReturnsAPIClient(t *testing.T) {
 		APIKey:       "dev-permission-api-key",
 		APIKeyHeader: "X-API-Key",
 	})
-	if _, ok := client.(*permissionapi.Client); !ok {
-		t.Fatalf("permission client type = %T, want *api.Client", client)
+	if client == nil {
+		t.Fatal("permission client = nil, want *permission.Client")
 	}
 }
 

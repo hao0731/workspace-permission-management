@@ -12,7 +12,6 @@ Related designs:
 - [Function Resource Permissions Design](function-resource-permissions.md): existing workspace and function scoped permission configuration APIs.
 - [Permission Client Design](permission-client-design.md): shared interaction boundary used to register derived resource attributes with the permission system.
 - [Permission API Client Design](permission-api-client-design.md): HTTP API client used by `function-service` to register derived resource attributes.
-- [In-Memory Permission Client Design](inmemory-permission-client-design.md): temporary and fallback permission client implementation.
 - [Resource Command and Event Domain Contracts](resource-command-event-contracts.md): existing resource lifecycle event contracts that still use `function_key` until the broader naming migration is designed.
 
 ## Classification and Policies
@@ -32,8 +31,8 @@ Policy alignment:
 - System resource definition and resource attribute domain types stay in `internal/domain/resource` and remain independent of Echo, MongoDB, and transport DTOs.
 - The service owns validation orchestration, limit checks, transaction orchestration, timestamp assignment, ID generation, and resource attribute derivation.
 - MongoDB access and transaction implementation details remain isolated in `internal/function-service/repositories`.
-- Permission registration is performed through `internal/shared/interactions/permission.Client` after local persistence succeeds, keeping the external side effect behind a shared interaction boundary.
-- The runtime permission client is `internal/shared/interactions/permission/api`, wired from `cmd/function-service/main.go` and replaceable without changing service business logic.
+- Permission registration is performed through `internal/function-service/services.PermissionClient` after local persistence succeeds, keeping the external side effect behind a consumer-side permission client interface.
+- The runtime permission client is `internal/shared/interactions/permission`, wired from `cmd/function-service/main.go` and replaceable without changing service business logic.
 - This design document is stored under `docs/designs/` and linked from the existing `function-service` design.
 
 ## Goals
@@ -53,7 +52,7 @@ Policy alignment:
 - Update `label`, `description`, and `updated_at` for existing resources.
 - Return only the persisted resources addressed by the POST request, preserving request order.
 - Recompute derived attributes from the latest persisted action, tag, and type sets after every successful write.
-- Register non-empty derived resource attributes with the permission system through `permission.Client.RegisterResourceAttributes` after the MongoDB transaction commits.
+- Register non-empty derived resource attributes with the permission system through `services.PermissionClient.RegisterResourceAttributes` after the MongoDB transaction commits.
 - Return an upstream dependency error when permission registration fails, while keeping the already committed local MongoDB changes.
 - Use a MongoDB transaction so resource definition updates and derived attribute updates succeed or fail together.
 - Return empty arrays for successful GET requests with no stored resource definitions or attributes.
@@ -85,7 +84,7 @@ Validation should treat `system_id` like the existing function/app key used in N
 
 ## Recommended Approach
 
-Use a system-scoped resource definition subdomain inside `function-service`. The HTTP layer receives system resource definitions, the service layer validates the merged post-write state and derives attributes, and the repository persists all local changes in one MongoDB transaction. After the transaction commits, the service synchronously registers the non-empty derived attributes through the shared permission client.
+Use a system-scoped resource definition subdomain inside `function-service`. The HTTP layer receives system resource definitions, the service layer validates the merged post-write state and derives attributes, and the repository persists all local changes in one MongoDB transaction. After the transaction commits, the service synchronously registers the non-empty derived attributes through the consumer-side permission client interface.
 
 This approach keeps resource definition management close to the existing function resource and permission contracts while preserving current service boundaries. It also keeps the external API small: clients can upsert definitions, list definitions, and read the derived attribute set without needing to understand the storage model. Runtime registration uses the permission API client from the composition root, so service business logic remains unchanged if a different concrete permission client is needed later.
 
@@ -442,19 +441,18 @@ The derived attribute string is not designed to be parsed back into action, tag,
 
 ## Permission Registration
 
-After a successful POST produces a non-empty derived resource attribute set, `function-service` must register that complete set through the shared permission client:
+After a successful POST produces a non-empty derived resource attribute set, `function-service` must register that complete set through the consumer-side permission client interface:
 
 ```go
-type Client interface {
+type PermissionClient interface {
 	RegisterResourceAttributes(ctx context.Context, systemID string, resourceAttributes []resource.ResourceAttribute) error
 }
 ```
 
 Package ownership:
 
-- The interface belongs in `internal/shared/interactions/permission`.
-- The runtime HTTP implementation belongs in `internal/shared/interactions/permission/api`.
-- The local fallback implementation belongs in `internal/shared/interactions/permission/inmemory`.
+- The consumer-side interface belongs in `internal/function-service/services`.
+- The runtime HTTP implementation belongs in `internal/shared/interactions/permission`.
 - `cmd/function-service/main.go` wires the API client into `SystemResourceService` from function-service permission API configuration.
 - `SystemResourceService` receives the client through dependency injection and should not construct the concrete client itself.
 
@@ -483,8 +481,6 @@ Recommended structured log keys:
 
 The API client maps `system_id` to the remote `definition` field and maps each derived attribute to a relation with fixed `condition: enable_dynamic_context` and `isPublic: false`. The detailed payload, header, and remote error contracts are defined in [Permission API Client Design](permission-api-client-design.md).
 
-The in-memory client remains available for tests or explicit local fallback. It always returns `nil` and logs the supplied parameters at debug level.
-
 If future requirements need retries, stronger delivery guarantees, or lower POST latency, use an outbox follow-up design. That design should write a registration outbox record in the same transaction as the local resource attribute document and process it asynchronously through a worker. This is intentionally deferred for the current synchronous client integration.
 
 ## Write Workflow
@@ -507,7 +503,7 @@ Save flow:
 12. If all three categories are present, repository upserts the single `system_resource_attributes` document for `system_id`.
 13. If any category is missing, repository does not write `system_resource_attributes`.
 14. Transaction commits.
-15. If derived attributes are non-empty, service calls `permission.Client.RegisterResourceAttributes`.
+15. If derived attributes are non-empty, service calls `services.PermissionClient.RegisterResourceAttributes`.
 16. If the permission client returns an error, service logs with `slog.Error` and returns `ErrPermissionRegistrationFailed` wrapped with the client error.
 17. Handler maps permission registration failure to `502 Bad Gateway`.
 18. Handler renders the persisted resources corresponding to the request, preserving request order, only when local persistence and permission registration both succeed.
@@ -550,14 +546,13 @@ internal/function-service/transport/
 
 internal/shared/interactions/permission/
   client.go
-
-internal/shared/interactions/permission/api/
-  client.go
   request.go
   errors.go
-
-internal/shared/interactions/permission/inmemory/
-  client.go
+  caveat/
+  object/
+  relation/
+  relationship/
+  subject/
 ```
 
 Responsibilities:
@@ -567,9 +562,7 @@ Responsibilities:
 - `internal/function-service/handlers`: Echo route registration, path/body parsing, service invocation, and error mapping.
 - `internal/function-service/services`: save/list/get-attributes workflows, post-write count validation, transaction orchestration, deterministic ID/time/logger seams, attribute derivation through `resource.NewResourceAttribute`, and post-commit permission registration through the shared client interface.
 - `internal/function-service/repositories`: MongoDB documents, index initialization, transaction runner, resource upserts, list reads, attribute document reads, and attribute upserts.
-- `internal/shared/interactions/permission`: permission client interface used by service workflows.
-- `internal/shared/interactions/permission/api`: HTTP API client, schema-write request DTOs, and remote permission API error DTOs.
-- `internal/shared/interactions/permission/inmemory`: debug-logging fallback client that implements the permission client interface and returns `nil`.
+- `internal/shared/interactions/permission`: HTTP API client, schema-write request DTOs, remote permission API error DTOs, and permission relationship helper packages.
 - `cmd/function-service/main.go`: config wiring, repository construction, index initialization, API permission client construction, service construction, and route registration.
 
 ## Configuration
@@ -662,15 +655,12 @@ Service tests:
 - Save does not call the permission client when derived attributes are empty.
 - Permission client failure is logged with `slog.Error`, returns `ErrPermissionRegistrationFailed`, and does not undo already committed repository writes.
 
-Shared permission client tests:
+Permission API client tests:
 
-- `internal/shared/interactions/permission` exposes the `Client` interface with `RegisterResourceAttributes`.
-- `internal/shared/interactions/permission/api.Client` implements the interface.
+- `internal/shared/interactions/permission.Client` implements `RegisterResourceAttributes`.
 - The API client sends the schema-write request to `/api/v1/schema/write` with JSON content type and the configured API key header.
 - The API client maps `system_id` to `definition`, resource attributes to `relations[*].resAttr`, fixed `condition` to `enable_dynamic_context`, and fixed `isPublic` to `false`.
 - The API client decodes the permission API error shape for non-2xx responses.
-- `internal/shared/interactions/permission/inmemory.Client` implements the interface.
-- The in-memory client logs at debug level and returns `nil`.
 
 Config and composition tests:
 
@@ -766,6 +756,6 @@ Additional verification may include `go vet ./...` if the implementation touches
 
 ## Implementation Plan Notes
 
-The follow-up implementation plan should be created under `docs/plans/active/` and link back to this design document, [function-service.md](function-service.md), [Permission Client Design](permission-client-design.md), [Permission API Client Design](permission-api-client-design.md), and [In-Memory Permission Client Design](inmemory-permission-client-design.md).
+The follow-up implementation plan should be created under `docs/plans/active/` and link back to this design document, [function-service.md](function-service.md), [Permission Client Design](permission-client-design.md), and [Permission API Client Design](permission-api-client-design.md).
 
 The plan should implement tests before production code where practical, especially for validation rules, post-write limit checks, transaction behavior, attribute derivation, permission client success and failure behavior, upsert timestamp preservation, empty GET responses, and API examples.
