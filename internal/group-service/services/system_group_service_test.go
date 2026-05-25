@@ -1,15 +1,19 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	permission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 )
 
 type fakeSystemGroupRepository struct {
@@ -20,6 +24,31 @@ type fakeSystemGroupRepository struct {
 	err              error
 	createCalls      int
 	listCalls        int
+}
+
+type fakeSystemGroupPermissionClient struct {
+	repo                   *fakeSystemGroupRepository
+	parameter              permission.WriteRelationshipsParameter
+	result                 permission.WriteRelationshipsResult
+	err                    error
+	resultFunc             func(permission.WriteRelationshipsParameter) permission.WriteRelationshipsResult
+	calls                  int
+	calledBeforeRepository bool
+}
+
+func (f *fakeSystemGroupPermissionClient) WriteRelationships(ctx context.Context, parameter permission.WriteRelationshipsParameter) (permission.WriteRelationshipsResult, error) {
+	f.calls++
+	f.parameter = parameter
+	if f.repo != nil && f.repo.createCalls == 0 {
+		f.calledBeforeRepository = true
+	}
+	if f.err != nil {
+		return permission.WriteRelationshipsResult{}, f.err
+	}
+	if f.resultFunc != nil {
+		return f.resultFunc(parameter), nil
+	}
+	return f.result, nil
 }
 
 func (f *fakeSystemGroupRepository) CreateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error) {
@@ -59,14 +88,33 @@ func validServiceSystemGroupInput() group.SystemGroupCreateInput {
 
 func TestSystemGroupServiceCreateSystemGroup(t *testing.T) {
 	repository := &fakeSystemGroupRepository{}
+	permissionClient := &fakeSystemGroupPermissionClient{repo: repository}
 	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
 		WithSystemGroupClock(fixedSystemGroupNow),
 		WithSystemGroupIDGenerator(func() string { return "group-1" }),
 	)
 
-	model, err := service.CreateSystemGroup(context.Background(), validServiceSystemGroupInput())
+	model, permissionErrors, err := service.CreateSystemGroup(context.Background(), validServiceSystemGroupInput())
 	if err != nil {
 		t.Fatalf("CreateSystemGroup error = %v, want nil", err)
+	}
+	if len(permissionErrors) != 0 {
+		t.Fatalf("permission errors = %#v, want empty", permissionErrors)
+	}
+	if permissionClient.calls != 1 {
+		t.Fatalf("permission client calls = %d, want 1", permissionClient.calls)
+	}
+	if !permissionClient.calledBeforeRepository {
+		t.Fatal("permission client was not called before repository create")
+	}
+	if len(permissionClient.parameter.Tasks) != 4 {
+		t.Fatalf("permission tasks len = %d, want 4", len(permissionClient.parameter.Tasks))
+	}
+	for _, task := range permissionClient.parameter.Tasks {
+		if task.Operator != permission.RelationshipOperationCreate {
+			t.Fatalf("permission task operator = %q, want create", task.Operator)
+		}
 	}
 	if repository.createCalls != 1 {
 		t.Fatalf("CreateSystemGroup repository calls = %d, want 1", repository.createCalls)
@@ -145,12 +193,125 @@ func TestSystemGroupServiceValidationFailureDoesNotCallRepository(t *testing.T) 
 	repository := &fakeSystemGroupRepository{}
 	service := NewSystemGroupService(repository)
 
-	_, err := service.CreateSystemGroup(context.Background(), group.SystemGroupCreateInput{SystemID: "system-a", Name: " "})
+	_, _, err := service.CreateSystemGroup(context.Background(), group.SystemGroupCreateInput{SystemID: "system-a", Name: " "})
 	if !errors.Is(err, group.ErrInvalidInput) {
 		t.Fatalf("CreateSystemGroup error = %v, want ErrInvalidInput", err)
 	}
 	if repository.createCalls != 0 {
 		t.Fatalf("repository calls = %d, want 0", repository.createCalls)
+	}
+}
+
+func TestSystemGroupServiceCreateSystemGroupPermissionFailureDoesNotCallRepository(t *testing.T) {
+	repository := &fakeSystemGroupRepository{}
+	permissionClient := &fakeSystemGroupPermissionClient{err: errors.New("permission unavailable")}
+	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
+		WithSystemGroupClock(fixedSystemGroupNow),
+		WithSystemGroupIDGenerator(func() string { return "group-1" }),
+	)
+
+	_, _, err := service.CreateSystemGroup(context.Background(), validServiceSystemGroupInput())
+	if !errors.Is(err, ErrSystemGroupPermissionWriteFailed) {
+		t.Fatalf("CreateSystemGroup error = %v, want ErrSystemGroupPermissionWriteFailed", err)
+	}
+	if repository.createCalls != 0 {
+		t.Fatalf("repository calls = %d, want 0", repository.createCalls)
+	}
+	if permissionClient.calls != 1 {
+		t.Fatalf("permission client calls = %d, want 1", permissionClient.calls)
+	}
+}
+
+func TestSystemGroupServiceCreateSystemGroupFiltersFailedPermissionRelationships(t *testing.T) {
+	repository := &fakeSystemGroupRepository{}
+	permissionClient := &fakeSystemGroupPermissionClient{
+		resultFunc: func(parameter permission.WriteRelationshipsParameter) permission.WriteRelationshipsResult {
+			failed := parameter.Tasks[1]
+			return permission.WriteRelationshipsResult{
+				FailedTasks: []permission.FailedRelationshipTask{{
+					RelationshipTask: failed,
+					Error:            "organization rejected",
+				}},
+			}
+		},
+	}
+	var logBuffer bytes.Buffer
+	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
+		WithSystemGroupClock(fixedSystemGroupNow),
+		WithSystemGroupIDGenerator(func() string { return "group-1" }),
+		WithSystemGroupLogger(slog.New(slog.NewTextHandler(&logBuffer, nil))),
+	)
+
+	model, permissionErrors, err := service.CreateSystemGroup(context.Background(), validServiceSystemGroupInput())
+	if err != nil {
+		t.Fatalf("CreateSystemGroup error = %v, want nil", err)
+	}
+	if len(permissionErrors) != 1 || permissionErrors[0] != "organization rejected" {
+		t.Fatalf("permission errors = %#v, want organization rejected", permissionErrors)
+	}
+	if len(repository.createProjection.Relationships) != 3 {
+		t.Fatalf("saved relationships len = %d, want failed relationship removed", len(repository.createProjection.Relationships))
+	}
+	orgValues := systemGroupRuleValues(model.GroupingRules, group.GroupAttributeOrganization)
+	if len(orgValues) != 1 || orgValues[0] != "ORG-100" {
+		t.Fatalf("organization rule values = %#v, want [ORG-100]", orgValues)
+	}
+	savedOrgValues := systemGroupRuleValues(repository.createGroup.GroupingRules, group.GroupAttributeOrganization)
+	if len(savedOrgValues) != 1 || savedOrgValues[0] != "ORG-100" {
+		t.Fatalf("saved organization rule values = %#v, want [ORG-100]", savedOrgValues)
+	}
+	output := logBuffer.String()
+	if !strings.Contains(output, "permission API relationship write partially failed") {
+		t.Fatalf("log output = %q, want partial failure warning", output)
+	}
+	if !strings.Contains(output, "system_id=system-a") {
+		t.Fatalf("log output = %q, want system_id", output)
+	}
+	if !strings.Contains(output, "group_id=group-1") {
+		t.Fatalf("log output = %q, want group_id", output)
+	}
+	if !strings.Contains(output, "failed_task_count=1") {
+		t.Fatalf("log output = %q, want failed_task_count", output)
+	}
+	if !strings.Contains(output, "organization rejected") {
+		t.Fatalf("log output = %q, want permission error", output)
+	}
+}
+
+func TestSystemGroupServiceCreateSystemGroupRebuildsRulesFromAcceptedRelationships(t *testing.T) {
+	repository := &fakeSystemGroupRepository{}
+	permissionClient := &fakeSystemGroupPermissionClient{
+		resultFunc: func(parameter permission.WriteRelationshipsParameter) permission.WriteRelationshipsResult {
+			failed := parameter.Tasks[2]
+			return permission.WriteRelationshipsResult{
+				FailedTasks: []permission.FailedRelationshipTask{{
+					RelationshipTask: failed,
+					Error:            "static attributes rejected",
+				}},
+			}
+		},
+	}
+	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
+		WithSystemGroupClock(fixedSystemGroupNow),
+		WithSystemGroupIDGenerator(func() string { return "group-1" }),
+	)
+
+	model, permissionErrors, err := service.CreateSystemGroup(context.Background(), validServiceSystemGroupInput())
+	if err != nil {
+		t.Fatalf("CreateSystemGroup error = %v, want nil", err)
+	}
+	if len(permissionErrors) != 1 || permissionErrors[0] != "static attributes rejected" {
+		t.Fatalf("permission errors = %#v, want static attributes rejected", permissionErrors)
+	}
+	if values := systemGroupRuleValues(model.GroupingRules, group.GroupAttributeJobLevel); len(values) != 0 {
+		t.Fatalf("job_level values = %#v, want static relationship removed", values)
+	}
+	tagValues := systemGroupRuleValues(model.GroupingRules, group.GroupAttributeJobTag)
+	if len(tagValues) != 1 || tagValues[0] != "a4_reviewer" {
+		t.Fatalf("job_tag values = %#v, want [a4_reviewer]", tagValues)
 	}
 }
 
@@ -165,4 +326,25 @@ func TestSystemGroupServiceListSystemGroups(t *testing.T) {
 	if len(page.Groups) != 1 || repository.listQuery.SystemID != "system-a" {
 		t.Fatalf("page/query = %+v/%+v, want normalized list", page, repository.listQuery)
 	}
+}
+
+func systemGroupRuleValues(rules []group.SystemGroupRule, key group.GroupAttributeKey) []string {
+	values := make([]string, 0)
+	for _, rule := range rules {
+		if rule.AttributeKey != key {
+			continue
+		}
+		if rule.Multi {
+			ruleValues, ok := rule.Value.([]string)
+			if ok {
+				values = append(values, ruleValues...)
+			}
+			continue
+		}
+		value, ok := rule.Value.(string)
+		if ok {
+			values = append(values, value)
+		}
+	}
+	return values
 }

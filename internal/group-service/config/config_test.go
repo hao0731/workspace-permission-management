@@ -29,6 +29,9 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	t.Setenv("GROUP_SERVICE_SHUTDOWN_TIMEOUT", "15s")
 	t.Setenv("GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS", "250")
 	t.Setenv("GROUP_SERVICE_MAX_GROUPING_RULES", "5")
+	t.Setenv("GROUP_SERVICE_PERMISSION_API_BASE_URL", "https://permission.example.com")
+	t.Setenv("GROUP_SERVICE_PERMISSION_API_KEY", "dev-permission-api-key")
+	t.Setenv("GROUP_SERVICE_PERMISSION_API_KEY_HEADER", "X-API-Key")
 
 	cfg, err := Load()
 	if err != nil {
@@ -99,6 +102,15 @@ func TestLoadReadsRequiredEnvironment(t *testing.T) {
 	}
 	if cfg.Validation.MaxGroupingRules != 5 {
 		t.Fatalf("MaxGroupingRules = %d, want 5", cfg.Validation.MaxGroupingRules)
+	}
+	if cfg.PermissionAPI.BaseURL != "https://permission.example.com" {
+		t.Fatalf("PermissionAPI.BaseURL = %q, want https://permission.example.com", cfg.PermissionAPI.BaseURL)
+	}
+	if cfg.PermissionAPI.APIKey != "dev-permission-api-key" {
+		t.Fatalf("PermissionAPI.APIKey = %q, want dev-permission-api-key", cfg.PermissionAPI.APIKey)
+	}
+	if cfg.PermissionAPI.APIKeyHeader != "X-API-Key" {
+		t.Fatalf("PermissionAPI.APIKeyHeader = %q, want X-API-Key", cfg.PermissionAPI.APIKeyHeader)
 	}
 }
 
@@ -195,6 +207,40 @@ func TestLoadRejectsInvalidValidationLimits(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidPermissionAPIConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		val  string
+		want string
+	}{
+		{
+			name: "base url",
+			key:  "GROUP_SERVICE_PERMISSION_API_BASE_URL",
+			val:  "ftp://permission.example.com",
+			want: "GROUP_SERVICE_PERMISSION_API_BASE_URL",
+		},
+		{
+			name: "api key header",
+			key:  "GROUP_SERVICE_PERMISSION_API_KEY_HEADER",
+			val:  "bad header",
+			want: "GROUP_SERVICE_PERMISSION_API_KEY_HEADER",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredGroupServiceConfig(t)
+			t.Setenv(tt.key, tt.val)
+
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsMissingGroupExpiryCommandConfig(t *testing.T) {
 	setRequiredGroupServiceConfig(t)
 	t.Setenv("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT", " ")
@@ -248,4 +294,7 @@ func setRequiredGroupServiceConfig(t *testing.T) {
 	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_STREAM", "INDIVIDUAL_MEMBER_EXPIRY")
 	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_DURABLE", "group-service-individual-member-expiry")
 	t.Setenv("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT", "app.todo.group.individual-member.expiry.process")
+	t.Setenv("GROUP_SERVICE_PERMISSION_API_BASE_URL", "http://localhost:8086")
+	t.Setenv("GROUP_SERVICE_PERMISSION_API_KEY", "dev-permission-api-key")
+	t.Setenv("GROUP_SERVICE_PERMISSION_API_KEY_HEADER", "X-API-Key")
 }

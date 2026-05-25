@@ -22,8 +22,42 @@ X-API-Key: {{apiKey}}
   ]
 }
 
-### Malformed payload returns 400
+### Malformed schema payload returns 400
 POST {{baseUrl}}/api/v1/schema/write
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+
+### Write relationships
+POST {{baseUrl}}/api/v1/relationships/write
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "updates": [
+    {
+      "operation": "create",
+      "relationship": {
+        "relation": "hr_member",
+        "resource": {
+          "object_id": "group-1",
+          "object_type": "group"
+        },
+        "subject": {
+          "object": {
+            "object_id": "ORG-100",
+            "object_type": "organization"
+          },
+          "optionalRelation": "member"
+        }
+      }
+    }
+  ]
+}
+
+### Malformed relationship payload returns 400
+POST {{baseUrl}}/api/v1/relationships/write
 Content-Type: application/json
 X-API-Key: {{apiKey}}
 

@@ -10,6 +10,11 @@ type SystemGroupCreateResponse struct {
 	Group SystemGroupResponse `json:"group"`
 }
 
+type SystemGroupCreatePartialResponse struct {
+	Group  SystemGroupResponse `json:"group"`
+	Errors []string            `json:"errors"`
+}
+
 type SystemGroupListResponse struct {
 	Groups   []SystemGroupResponse `json:"groups"`
 	PageInfo PageInfoResponse      `json:"page_info"`
@@ -32,6 +37,13 @@ type SystemGroupRuleResponse struct {
 
 func NewSystemGroupCreateResponse(model group.SystemGroup) SystemGroupCreateResponse {
 	return SystemGroupCreateResponse{Group: newSystemGroupResponse(model)}
+}
+
+func NewSystemGroupCreatePartialResponse(model group.SystemGroup, errors []string) SystemGroupCreatePartialResponse {
+	return SystemGroupCreatePartialResponse{
+		Group:  newSystemGroupResponse(model),
+		Errors: append([]string(nil), errors...),
+	}
 }
 
 func NewSystemGroupListResponse(page group.SystemGroupPage) (SystemGroupListResponse, error) {

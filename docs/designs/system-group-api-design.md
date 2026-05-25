@@ -41,6 +41,9 @@ Policy alignment:
 - Persist `system_id` in both collections.
 - Convert accepted `grouping_rules` into permission API `Relationship` values.
 - Compute one SHA256 checksum per generated relationship.
+- Write generated relationships to the permission API before MongoDB persistence.
+- Persist only relationships accepted by the permission API when the permission API returns per-task failures.
+- Return `206 Partial Content` with the saved adjusted group and permission API error strings when some relationship write tasks fail.
 - Write `system_groups` and `system_group_relationships` atomically in one MongoDB transaction during create.
 - Support cursor pagination for system group list with default `limit = 20` and maximum `limit = 50`.
 - Return empty pages for systems with no groups.
@@ -51,7 +54,6 @@ Policy alignment:
 - Do not validate whether `system_id` references an existing system registry. No registry exists in this repository yet.
 - Do not implement system group read-by-ID, update, delete, restore, hard delete, history, or relationship recalculation APIs.
 - Do not publish group-created or membership-changed events.
-- Do not register the generated relationships with an external permission API in this phase; this design only persists the projection.
 - Do not add frontend changes.
 
 ## System ID
@@ -168,12 +170,41 @@ HTTP/1.1 201 Created
 }
 ```
 
+Partial success response:
+
+```http
+HTTP/1.1 206 Partial Content
+```
+
+```json
+{
+  "group": {
+    "id": "0d5c4f7e-7675-4c90-b495-93655c2d3c40",
+    "name": "System Admins",
+    "grouping_rules": [
+      {
+        "attribute_key": "organization",
+        "operator": "eq",
+        "multi": true,
+        "value": ["ORG-100"]
+      }
+    ],
+    "created_at": "2026-05-20T10:00:00Z",
+    "updated_at": "2026-05-20T10:00:00Z"
+  },
+  "errors": [
+    "permission relationship already exists"
+  ]
+}
+```
+
 Create field contract:
 
 - `system_id` is taken from the path, persisted, and not returned in the group object.
 - `name` is required, trimmed before validation and persistence, and returned trimmed.
 - `grouping_rules` is required and must be an array. An empty array is allowed and means the generated projection falls back to all-employee HR and A4 relationships.
 - The response wraps the created group in `{ "group": ... }`.
+- When permission API relationship writes partially fail, the response wraps the adjusted saved group in `{ "group": ... }` and includes `errors`.
 - `created_at` and `updated_at` are assigned from one service-generated UTC timestamp.
 - Timestamps are returned as RFC3339 strings through Go JSON encoding for `time.Time`.
 - The endpoint does not check whether the system exists in another registry.
@@ -410,6 +441,7 @@ Checksum contract:
 - Compute SHA256 over the JSON bytes.
 - Store the checksum as a lowercase hex string.
 - If marshaling fails, the create request fails before starting the MongoDB transaction.
+- Failed permission API tasks are matched back to the original generated projection by recomputing this checksum over the failed relationship payload.
 
 The relationship helper structs use deterministic struct field order. Derived value sorting keeps logically equivalent rule sets stable even when duplicate values appear in different request positions.
 
@@ -494,19 +526,39 @@ Rationale:
 4. Service builds the system group domain model.
 5. Service builds the deterministic relationship projection from `grouping_rules`.
 6. Service computes one checksum per relationship.
-7. Repository starts a MongoDB session and executes the write callback through `session.WithTransaction`.
-8. Repository inserts the `system_groups` document.
-9. Repository inserts the matching `system_group_relationships` document.
-10. MongoDB commits the transaction.
-11. Service returns the created group.
-12. Handler renders `201 Created` with `{ "group": ... }`.
+7. Service sends one `create` task per generated relationship to `WriteRelationships`.
+8. If the permission API returns no failed tasks, service keeps the original group and projection unchanged.
+9. If the permission API returns failed tasks, service logs a warning with `system_id`, `group_id`, failed count, and error strings.
+10. If the permission API returns failed tasks, service recomputes failed relationship checksums, removes matching relationships from the original projection, and rebuilds the saved group from the remaining relationships.
+11. Repository starts a MongoDB session and executes the write callback through `session.WithTransaction`.
+12. Repository inserts the `system_groups` document.
+13. Repository inserts the matching `system_group_relationships` document.
+14. MongoDB commits the transaction.
+15. Service returns the created group plus permission API error strings.
+16. Handler renders `201 Created` with `{ "group": ... }` when no permission task failed.
+17. Handler renders `206 Partial Content` with `{ "group": ..., "errors": [...] }` when at least one permission task failed.
 
 Failure behavior:
 
 - Validation errors return `400 Bad Request` with `validation_failed`.
 - If relationship generation or checksum computation fails, no MongoDB transaction is started.
+- If the permission API request fails as a whole, no MongoDB transaction is started and the handler returns an upstream dependency error.
 - If either insert fails, the transaction is aborted and neither collection contains partial create data.
 - Unexpected repository, transaction, or infrastructure failures return `500 Internal Server Error`.
+
+### Relationship-to-Group Rebuild
+
+Partial permission API failures require rebuilding the saved public group from the accepted relationship projection. The rebuild uses the inverse of the existing generation rules:
+
+- Organization relationships become one `organization` multi rule containing sorted organization IDs.
+- A static attributes relationship contributes:
+  - one `job_type` rule when `allowed_types` contains a value,
+  - one `job_level` rule per sorted `allowed_levels` value,
+  - `_internal_secretary_` in the `job_tag` rule when `is_contain_secretary` is `true`.
+- A4 role relationships become `job_tag` values.
+- HR and A4 all-employee fallback relationships do not create public rules.
+
+The relationship projection remains the accurate permission state when all relationships of a fallback category fail. A rebuilt group with no public rules therefore does not imply that fallback relationships were saved; callers should use the `206` errors to detect partial permission state.
 
 ### List
 
@@ -543,11 +595,14 @@ Known errors use the shared backend error response shape:
 Status mapping:
 
 - `400 Bad Request`: malformed JSON, invalid path identity, invalid query parameter, invalid `next_token`, unsupported operator, invalid rule shape, empty `name`, empty string values, invalid `job_type` value, or more than one `job_type` rule.
+- `206 Partial Content`: system group was saved after one or more permission relationship write tasks failed; response includes `errors`.
+- `502 Bad Gateway`: permission API request-level failure before local persistence.
 - `500 Internal Server Error`: unexpected repository, transaction, checksum, or infrastructure failure.
 
 Recommended error codes:
 
 - `validation_failed`
+- `permission_write_failed`
 - `internal_error`
 
 The handler should log unexpected errors with structured keys such as `err`, `system_id`, and `group_id`. Validation errors should remain safe for clients and must not leak generated relationship internals.
@@ -625,6 +680,11 @@ Transport tests:
 Service tests:
 
 - Successful create generates deterministic group ID and timestamps.
+- Successful create sends generated relationships to the permission API as `create` tasks before repository persistence.
+- Permission API request-level failure returns a permission write failure and does not call the repository.
+- Permission API failed tasks remove matching relationships by checksum before repository persistence.
+- Permission API failed tasks rebuild the saved group from the remaining relationships.
+- Permission API failed tasks produce warning logs with `system_id`, `group_id`, failed count, and errors.
 - Successful create builds HR organization relationships from deduped organization values.
 - Create without organization values builds `NewAllEmployeeToGroupForHRRelationship`.
 - Create with any job type rule, any job level rule, or a job tag value of `_internal_secretary_` builds `NewGroupWithStaticAttributesRelationship`.
@@ -653,6 +713,8 @@ Repository tests:
 Handler tests:
 
 - Successful create returns `201` and the documented response body.
+- Partial permission relationship write failure returns `206` with `group` and `errors`.
+- Permission API request-level failure returns `502`.
 - Successful list returns `200` with `groups` and `page_info`.
 - Empty list returns `200` with an empty group array and empty `next_token`.
 - Invalid create requests return `400`.

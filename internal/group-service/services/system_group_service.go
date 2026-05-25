@@ -2,25 +2,36 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	permission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 )
+
+var ErrSystemGroupPermissionWriteFailed = errors.New("system group permission write failed")
 
 type SystemGroupRepository interface {
 	CreateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error)
 	ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error)
 }
 
+type SystemGroupPermissionClient interface {
+	WriteRelationships(ctx context.Context, parameter permission.WriteRelationshipsParameter) (permission.WriteRelationshipsResult, error)
+}
+
 type SystemGroupOption func(*SystemGroupService)
 
 type SystemGroupService struct {
-	repository  SystemGroupRepository
-	idGenerator func() string
-	now         func() time.Time
+	repository       SystemGroupRepository
+	permissionClient SystemGroupPermissionClient
+	idGenerator      func() string
+	now              func() time.Time
+	logger           *slog.Logger
 }
 
 func NewSystemGroupService(repository SystemGroupRepository, opts ...SystemGroupOption) *SystemGroupService {
@@ -30,6 +41,7 @@ func NewSystemGroupService(repository SystemGroupRepository, opts ...SystemGroup
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+		logger: slog.Default(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -37,6 +49,12 @@ func NewSystemGroupService(repository SystemGroupRepository, opts ...SystemGroup
 		}
 	}
 	return service
+}
+
+func WithSystemGroupPermissionClient(permissionClient SystemGroupPermissionClient) SystemGroupOption {
+	return func(s *SystemGroupService) {
+		s.permissionClient = permissionClient
+	}
 }
 
 func WithSystemGroupIDGenerator(generator func() string) SystemGroupOption {
@@ -55,11 +73,19 @@ func WithSystemGroupClock(clock func() time.Time) SystemGroupOption {
 	}
 }
 
-func (s *SystemGroupService) CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, error) {
+func WithSystemGroupLogger(logger *slog.Logger) SystemGroupOption {
+	return func(s *SystemGroupService) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
+}
+
+func (s *SystemGroupService) CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, []string, error) {
 	now := s.now().UTC()
 	input = input.Normalize()
 	if err := input.Validate(); err != nil {
-		return group.SystemGroup{}, err
+		return group.SystemGroup{}, nil, err
 	}
 	model := group.SystemGroup{
 		ID:            s.idGenerator(),
@@ -71,13 +97,17 @@ func (s *SystemGroupService) CreateSystemGroup(ctx context.Context, input group.
 	}
 	projection, err := buildSystemGroupRelationshipProjection(model.SystemID, model.ID, model.GroupingRules, now)
 	if err != nil {
-		return group.SystemGroup{}, err
+		return group.SystemGroup{}, nil, err
+	}
+	model, projection, permissionErrors, err := s.writeSystemGroupRelationships(ctx, model, projection)
+	if err != nil {
+		return group.SystemGroup{}, nil, err
 	}
 	saved, err := s.repository.CreateSystemGroup(ctx, model, projection)
 	if err != nil {
-		return group.SystemGroup{}, fmt.Errorf("create system group: %w", err)
+		return group.SystemGroup{}, nil, fmt.Errorf("create system group: %w", err)
 	}
-	return saved, nil
+	return saved, permissionErrors, nil
 }
 
 func (s *SystemGroupService) ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error) {
@@ -90,4 +120,75 @@ func (s *SystemGroupService) ListSystemGroups(ctx context.Context, query group.S
 		return group.SystemGroupPage{}, fmt.Errorf("list system groups: %w", err)
 	}
 	return page, nil
+}
+
+func (s *SystemGroupService) writeSystemGroupRelationships(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, group.SystemGroupRelationshipProjection, []string, error) {
+	if s.permissionClient == nil {
+		err := errors.New("permission client is not configured")
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, fmt.Errorf("%w: %w", ErrSystemGroupPermissionWriteFailed, err)
+	}
+	tasks, err := newSystemGroupRelationshipCreateTasks(projection)
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, err
+	}
+	result, err := s.permissionClient.WriteRelationships(ctx, permission.WriteRelationshipsParameter{Tasks: tasks})
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, fmt.Errorf("%w: %w", ErrSystemGroupPermissionWriteFailed, err)
+	}
+	if len(result.FailedTasks) == 0 {
+		return model, projection, nil, nil
+	}
+	filteredProjection, permissionErrors, err := filterFailedSystemGroupRelationships(projection, result.FailedTasks)
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, err
+	}
+	adjustedModel, err := rebuildSystemGroupFromRelationshipProjection(model, filteredProjection)
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, err
+	}
+	s.logger.WarnContext(ctx, "permission API relationship write partially failed",
+		"system_id", model.SystemID,
+		"group_id", model.ID,
+		"failed_task_count", len(result.FailedTasks),
+		"errors", permissionErrors,
+	)
+	return adjustedModel, filteredProjection, permissionErrors, nil
+}
+
+func newSystemGroupRelationshipCreateTasks(projection group.SystemGroupRelationshipProjection) ([]permission.RelationshipTask, error) {
+	tasks := make([]permission.RelationshipTask, 0, len(projection.Relationships))
+	for _, info := range projection.Relationships {
+		relationship, err := permissionRelationshipValue(info.Relationship)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, permission.RelationshipTask{
+			Operator:     permission.RelationshipOperationCreate,
+			Relationship: relationship,
+		})
+	}
+	return tasks, nil
+}
+
+func filterFailedSystemGroupRelationships(projection group.SystemGroupRelationshipProjection, failedTasks []permission.FailedRelationshipTask) (group.SystemGroupRelationshipProjection, []string, error) {
+	failedChecksums := make(map[string]struct{}, len(failedTasks))
+	permissionErrors := make([]string, 0, len(failedTasks))
+	for _, task := range failedTasks {
+		checksum, err := relationshipChecksum(task.Relationship)
+		if err != nil {
+			return group.SystemGroupRelationshipProjection{}, nil, err
+		}
+		failedChecksums[checksum] = struct{}{}
+		permissionErrors = append(permissionErrors, task.Error)
+	}
+
+	filtered := projection
+	filtered.Relationships = make([]group.RelationshipInfo, 0, len(projection.Relationships))
+	for _, info := range projection.Relationships {
+		if _, failed := failedChecksums[info.Checksum]; failed {
+			continue
+		}
+		filtered.Relationships = append(filtered.Relationships, info)
+	}
+	return filtered, permissionErrors, nil
 }

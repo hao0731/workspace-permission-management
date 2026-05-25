@@ -34,6 +34,17 @@ func TestRegisterHealthRoutes(t *testing.T) {
 	}
 }
 
+func TestNewPermissionClientReturnsAPIClient(t *testing.T) {
+	client := newPermissionClient(config.PermissionAPIConfig{
+		BaseURL:      "http://localhost:8086",
+		APIKey:       "dev-permission-api-key",
+		APIKeyHeader: "X-API-Key",
+	})
+	if client == nil {
+		t.Fatal("permission client = nil, want *permission.Client")
+	}
+}
+
 func TestNewGroupExpiryEventbusConfig(t *testing.T) {
 	cfg := config.Config{
 		GroupExpiryCommand: config.GroupExpiryCommandConfig{
