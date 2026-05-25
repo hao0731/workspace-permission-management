@@ -23,6 +23,7 @@ func NewSchemaHandler(logger *slog.Logger) *SchemaHandler {
 
 func RegisterRoutes(e *echo.Echo, handler *SchemaHandler) {
 	e.POST("/api/v1/schema/write", handler.WriteSchema)
+	e.POST("/api/v1/relationships/write", handler.WriteRelationships)
 }
 
 func (h *SchemaHandler) WriteSchema(c *echo.Context) error {
@@ -39,4 +40,36 @@ func (h *SchemaHandler) WriteSchema(c *echo.Context) error {
 		"relation_count", len(request.Relations),
 	)
 	return c.NoContent(http.StatusOK)
+}
+
+func (h *SchemaHandler) WriteRelationships(c *echo.Context) error {
+	var request permission.WriteRelationshipsRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, permission.ErrorResponse{
+			Code:    http.StatusBadRequest,
+			Error:   "validation_failed",
+			Message: "Invalid relationships write payload",
+		})
+	}
+	h.logger.InfoContext(c.Request().Context(), "mock permission relationships write received",
+		"payload", request,
+		"update_count", len(request.Updates),
+	)
+	response := permission.WriteRelationshipsResponse{
+		Deletes: make([]permission.UpdatedRelationshipTask, 0),
+		Writes:  make([]permission.UpdatedRelationshipTask, 0),
+	}
+	for _, update := range request.Updates {
+		task := permission.UpdatedRelationshipTask{
+			Relationship: update.Relationship,
+			Success:      true,
+		}
+		switch update.Operation {
+		case permission.RelationshipOperationDelete:
+			response.Deletes = append(response.Deletes, task)
+		default:
+			response.Writes = append(response.Writes, task)
+		}
+	}
+	return c.JSON(http.StatusOK, response)
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
 	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/caveat"
+	permissionrelation "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/relation"
 	permissionrelationship "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/relationship"
 )
 
@@ -139,5 +140,168 @@ func removeString(values []string, target string) []string {
 			out = append(out, value)
 		}
 	}
+	return out
+}
+
+func permissionRelationshipValue(value any) (permissionrelationship.Relationship, error) {
+	switch relationship := value.(type) {
+	case permissionrelationship.Relationship:
+		return relationship, nil
+	case *permissionrelationship.Relationship:
+		if relationship == nil {
+			return permissionrelationship.Relationship{}, fmt.Errorf("system group relationship is nil")
+		}
+		return *relationship, nil
+	default:
+		data, err := json.Marshal(value)
+		if err != nil {
+			return permissionrelationship.Relationship{}, fmt.Errorf("marshal system group relationship value: %w", err)
+		}
+		var decoded permissionrelationship.Relationship
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return permissionrelationship.Relationship{}, fmt.Errorf("unmarshal system group relationship value: %w", err)
+		}
+		return decoded, nil
+	}
+}
+
+func rebuildSystemGroupFromRelationshipProjection(model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error) {
+	organizationIDs := map[string]struct{}{}
+	jobLevels := map[string]struct{}{}
+	a4Roles := map[string]struct{}{}
+	jobType := ""
+	containsSecretary := false
+
+	for _, info := range projection.Relationships {
+		relationship, err := permissionRelationshipValue(info.Relationship)
+		if err != nil {
+			return group.SystemGroup{}, err
+		}
+		switch relationship.Relation {
+		case permissionrelation.HRMemberRelation:
+			if relationship.Subject.Object.ObjectType == "organization" {
+				organizationIDs[relationship.Subject.Object.ObjectID] = struct{}{}
+			}
+		case permissionrelation.CheckedMemberRelation:
+			params, ok, err := staticAttributesCheckParam(relationship.Caveat)
+			if err != nil {
+				return group.SystemGroup{}, err
+			}
+			if !ok {
+				continue
+			}
+			if len(params.AllowedTypes) > 0 {
+				jobType = params.AllowedTypes[0]
+			}
+			for _, level := range params.AllowedLevels {
+				jobLevels[level] = struct{}{}
+			}
+			if params.IsContainSecretary {
+				containsSecretary = true
+			}
+		case permissionrelation.A4RoleMemberRelation:
+			if relationship.Subject.Object.ObjectType == "business_role" {
+				a4Roles[relationship.Subject.Object.ObjectID] = struct{}{}
+			}
+		}
+	}
+
+	rules := make([]group.SystemGroupRule, 0)
+	if values := sortedMapKeys(organizationIDs); len(values) > 0 {
+		rules = append(rules, group.SystemGroupRule{
+			AttributeKey: group.GroupAttributeOrganization,
+			Operator:     group.OperatorEq,
+			Multi:        true,
+			Value:        values,
+		})
+	}
+	if jobType != "" {
+		rules = append(rules, group.SystemGroupRule{
+			AttributeKey: group.GroupAttributeJobType,
+			Operator:     group.OperatorEq,
+			Multi:        false,
+			Value:        jobType,
+		})
+	}
+	for _, level := range sortedMapKeys(jobLevels) {
+		rules = append(rules, group.SystemGroupRule{
+			AttributeKey: group.GroupAttributeJobLevel,
+			Operator:     group.OperatorEq,
+			Multi:        false,
+			Value:        level,
+		})
+	}
+	jobTags := sortedMapKeys(a4Roles)
+	if containsSecretary {
+		jobTags = append(jobTags, group.SystemGroupSecretarySentinel)
+	}
+	if len(jobTags) > 0 {
+		rules = append(rules, group.SystemGroupRule{
+			AttributeKey: group.GroupAttributeJobTag,
+			Operator:     group.OperatorEq,
+			Multi:        true,
+			Value:        jobTags,
+		})
+	}
+
+	model.GroupingRules = rules
+	return model, nil
+}
+
+func staticAttributesCheckParam(cav *caveat.Caveat) (caveat.StaticAttributesCheckParam, bool, error) {
+	if cav == nil || cav.Name != "static_attributes_check" {
+		return caveat.StaticAttributesCheckParam{}, false, nil
+	}
+	switch context := cav.Context.(type) {
+	case caveat.StaticAttributesCheckParam:
+		return context, true, nil
+	case map[string]any:
+		return caveat.StaticAttributesCheckParam{
+			AllowedTypes:       stringValuesFromAny(context["allowed_types"]),
+			AllowedLevels:      stringValuesFromAny(context["allowed_levels"]),
+			IsContainSecretary: boolValueFromAny(context["is_contain_secretary"]),
+		}, true, nil
+	default:
+		data, err := json.Marshal(context)
+		if err != nil {
+			return caveat.StaticAttributesCheckParam{}, false, fmt.Errorf("marshal static attributes caveat context: %w", err)
+		}
+		var params caveat.StaticAttributesCheckParam
+		if err := json.Unmarshal(data, &params); err != nil {
+			return caveat.StaticAttributesCheckParam{}, false, fmt.Errorf("unmarshal static attributes caveat context: %w", err)
+		}
+		return params, true, nil
+	}
+}
+
+func stringValuesFromAny(value any) []string {
+	switch values := value.(type) {
+	case []string:
+		return append([]string(nil), values...)
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			stringValue, ok := value.(string)
+			if ok {
+				out = append(out, stringValue)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func boolValueFromAny(value any) bool {
+	boolValue, ok := value.(bool)
+	return ok && boolValue
+}
+
+func sortedMapKeys(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
 	return out
 }

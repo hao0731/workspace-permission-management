@@ -36,6 +36,22 @@ Content-Type: application/json
   ]
 }
 
+### Create system group may return 206 when permission relationship writes partially fail
+POST {{baseUrl}}/api/v1/systems/{{systemId}}/groups
+Content-Type: application/json
+
+{
+  "name": "Partial Permission Example",
+  "grouping_rules": [
+    {
+      "attribute_key": "organization",
+      "operator": "eq",
+      "multi": true,
+      "value": ["ORG-100", "ORG-200"]
+    }
+  ]
+}
+
 ### Create system group with empty rules
 POST {{baseUrl}}/api/v1/systems/{{systemId}}/groups
 Content-Type: application/json

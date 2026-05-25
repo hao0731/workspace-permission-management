@@ -15,6 +15,7 @@ import (
 	"github.com/hao0731/workspace-permission-management/internal/group-service/services"
 	"github.com/hao0731/workspace-permission-management/internal/shared/eventbus"
 	"github.com/hao0731/workspace-permission-management/internal/shared/health"
+	permission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 	sharedlogger "github.com/hao0731/workspace-permission-management/internal/shared/logger"
 	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
@@ -36,6 +37,10 @@ func (processIndicator) Name() string {
 
 func (processIndicator) IsHealthy(context.Context) bool {
 	return true
+}
+
+func newPermissionClient(cfg config.PermissionAPIConfig) *permission.Client {
+	return permission.New(cfg.BaseURL, cfg.APIKey, cfg.APIKeyHeader)
 }
 
 func main() {
@@ -88,7 +93,11 @@ func run() error {
 		services.WithGroupExpiryBucketLocation(cfg.GroupExpiryCommand.BucketLocation),
 		services.WithIndividualMemberExpiryBucketLocation(cfg.IndividualMemberExpiryCommand.BucketLocation),
 	)
-	systemGroupService := services.NewSystemGroupService(repository)
+	permissionClient := newPermissionClient(cfg.PermissionAPI)
+	systemGroupService := services.NewSystemGroupService(repository,
+		services.WithSystemGroupPermissionClient(permissionClient),
+		services.WithSystemGroupLogger(logger),
+	)
 	httpService := groupHTTPService{
 		GroupService:       groupService,
 		SystemGroupService: systemGroupService,

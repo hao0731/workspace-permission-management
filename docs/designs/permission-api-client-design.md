@@ -4,6 +4,8 @@
 
 `function-service` registers derived system resource attributes through a consumer-side permission registration interface owned by `internal/function-service/services`. The concrete HTTP client sends the complete derived resource attribute set to a permission API at `POST /api/v1/schema/write`.
 
+`group-service` also uses the same concrete HTTP client to write generated system group relationships to the permission API at `POST /api/v1/relationships/write` before saving the local MongoDB projection.
+
 Local development uses a lightweight `mock-permission-api` service that logs received payloads and returns success. The mock uses the same request and error DTOs as the client so local tests detect payload drift.
 
 Related designs:
@@ -34,11 +36,13 @@ Policy alignment:
 
 - Use `internal/shared/interactions/permission` as the concrete HTTP permission API package.
 - Implement `RegisterResourceAttributes` so `*permission.Client` satisfies `services.PermissionClient`.
+- Implement `WriteRelationships` so `*permission.Client` can be injected behind the group-service system group permission writer interface.
 - Construct the API client with `baseURL`, `apiKey`, and the API key header name.
 - Send all API requests with:
   - `Content-Type: application/json`
   - `<apiKeyHeaderKey>: <apiKey>`
 - Implement `RegisterResourceAttributes` by sending `POST <baseURL>/api/v1/schema/write`.
+- Implement `WriteRelationships` by sending `POST <baseURL>/api/v1/relationships/write`.
 - Put request DTOs in `internal/shared/interactions/permission/request.go`.
 - Put API error response DTOs and client error types in `internal/shared/interactions/permission/errors.go`.
 - Keep relationship helper packages directly under `internal/shared/interactions/permission`.
@@ -172,12 +176,117 @@ Example payload:
 }
 ```
 
+### Relationship Write Request
+
+Consumer-facing parameter:
+
+```go
+type WriteRelationshipsParameter struct {
+	Tasks []RelationshipTask
+}
+
+type RelationshipTask struct {
+	Operator     RelationshipOperation
+	Relationship relationship.Relationship
+}
+
+type RelationshipOperation string
+```
+
+Supported operations:
+
+- `create`
+- `delete`
+
+Remote payload:
+
+```go
+type WriteRelationshipsRequest struct {
+	Updates []RelationshipUpdateTask `json:"updates"`
+}
+
+type RelationshipUpdateTask struct {
+	Operation    RelationshipOperation      `json:"operation"`
+	Relationship relationship.Relationship  `json:"relationship"`
+}
+```
+
+Mapping rules:
+
+- Preserve the supplied task order in `updates`.
+- Map `Task.Operator` to `updates[*].operation`.
+- Copy the supplied relationship value without mutating the caller's slice.
+
+Example payload:
+
+```json
+{
+  "updates": [
+    {
+      "operation": "create",
+      "relationship": {
+        "relation": "hr_member",
+        "resource": { "object_id": "group-1", "object_type": "group" },
+        "subject": {
+          "object": { "object_id": "ORG-100", "object_type": "organization" },
+          "optionalRelation": "member"
+        }
+      }
+    }
+  ]
+}
+```
+
+### Relationship Write Response
+
+Remote response:
+
+```go
+type WriteRelationshipsResponse struct {
+	Deletes []UpdatedRelationshipTask `json:"deletes"`
+	Writes  []UpdatedRelationshipTask `json:"writes"`
+}
+
+type UpdatedRelationshipTask struct {
+	Error        string                    `json:"error"`
+	Relationship relationship.Relationship `json:"relationship"`
+	Success      bool                      `json:"success"`
+}
+```
+
+Consumer-facing result:
+
+```go
+type WriteRelationshipsResult struct {
+	SuccessTasks []RelationshipTask
+	FailedTasks  []FailedRelationshipTask
+}
+
+type FailedRelationshipTask struct {
+	RelationshipTask
+	Error string
+}
+```
+
+Mapping rules:
+
+- Items in `writes` map to `RelationshipOperationCreate`.
+- Items in `deletes` map to `RelationshipOperationDelete`.
+- `success: true` appends to `SuccessTasks`.
+- `success: false` appends to `FailedTasks` with the permission API supplied `error` string.
+
 ## HTTP Behavior
 
 Endpoint:
 
 ```http
 POST /api/v1/schema/write
+```
+
+Relationship write endpoint:
+
+```http
+POST /api/v1/relationships/write
 ```
 
 The concrete client sends:
@@ -188,10 +297,19 @@ Content-Type: application/json
 <apiKeyHeaderKey>: <apiKey>
 ```
 
+and:
+
+```http
+POST <baseURL>/api/v1/relationships/write
+Content-Type: application/json
+<apiKeyHeaderKey>: <apiKey>
+```
+
 Success behavior:
 
 - Any `2xx` response means registration succeeded.
-- The response body is ignored for success.
+- The schema write response body is ignored for success.
+- The relationship write response body is decoded and mapped to `WriteRelationshipsResult`.
 
 Failure behavior:
 

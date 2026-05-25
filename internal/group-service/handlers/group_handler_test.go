@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	"github.com/hao0731/workspace-permission-management/internal/group-service/services"
 	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
 	"github.com/labstack/echo/v5"
 )
@@ -31,6 +32,7 @@ type fakeHTTPGroupService struct {
 	page              group.IndividualMemberPage
 	systemGroupModel  group.SystemGroup
 	systemGroupPage   group.SystemGroupPage
+	systemGroupErrors []string
 	addedMembers      []group.IndividualMember
 	err               error
 	calls             int
@@ -105,13 +107,13 @@ func (f *fakeHTTPGroupService) DeleteIndividualMember(ctx context.Context, input
 	return f.err
 }
 
-func (f *fakeHTTPGroupService) CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, error) {
+func (f *fakeHTTPGroupService) CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, []string, error) {
 	f.systemCreateCalls++
 	f.systemGroupInput = input
 	if f.err != nil {
-		return group.SystemGroup{}, f.err
+		return group.SystemGroup{}, nil, f.err
 	}
-	return f.systemGroupModel, nil
+	return f.systemGroupModel, f.systemGroupErrors, nil
 }
 
 func (f *fakeHTTPGroupService) ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error) {
@@ -559,6 +561,58 @@ func TestGroupHandlerCreateSystemGroup(t *testing.T) {
 	}
 	if _, ok := body["group"]; !ok {
 		t.Fatal("response missing group")
+	}
+}
+
+func TestGroupHandlerCreateSystemGroupPartialPermissionFailure(t *testing.T) {
+	service := &fakeHTTPGroupService{
+		systemGroupModel:  systemGroupHandlerModel(),
+		systemGroupErrors: []string{"organization rejected"},
+	}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/systems/system-a/groups", strings.NewReader(validSystemGroupRequestBody()))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206", rec.Code)
+	}
+	var body struct {
+		Group  map[string]any `json:"group"`
+		Errors []string       `json:"errors"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Group["id"] != "group-1" {
+		t.Fatalf("group id = %v, want group-1", body.Group["id"])
+	}
+	if len(body.Errors) != 1 || body.Errors[0] != "organization rejected" {
+		t.Fatalf("errors = %#v, want organization rejected", body.Errors)
+	}
+}
+
+func TestGroupHandlerCreateSystemGroupPermissionWriteFailure(t *testing.T) {
+	service := &fakeHTTPGroupService{err: services.ErrSystemGroupPermissionWriteFailed}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/systems/system-a/groups", strings.NewReader(validSystemGroupRequestBody()))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	var body map[string]map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"]["code"] != "permission_write_failed" {
+		t.Fatalf("error code = %v, want permission_write_failed", body["error"]["code"])
 	}
 }
 

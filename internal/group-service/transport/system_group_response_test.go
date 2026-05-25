@@ -50,6 +50,27 @@ func TestNewSystemGroupCreateResponse(t *testing.T) {
 	}
 }
 
+func TestNewSystemGroupCreatePartialResponse(t *testing.T) {
+	response := NewSystemGroupCreatePartialResponse(transportSystemGroupModel(), []string{"organization rejected"})
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("Marshal error = %v, want nil", err)
+	}
+	var body struct {
+		Group  map[string]any `json:"group"`
+		Errors []string       `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("Unmarshal error = %v, want nil", err)
+	}
+	if body.Group["name"] != "System Admins" {
+		t.Fatalf("name = %v, want System Admins", body.Group["name"])
+	}
+	if len(body.Errors) != 1 || body.Errors[0] != "organization rejected" {
+		t.Fatalf("errors = %#v, want organization rejected", body.Errors)
+	}
+}
+
 func TestNewSystemGroupListResponse(t *testing.T) {
 	page := group.SystemGroupPage{
 		Groups:      []group.SystemGroup{transportSystemGroupModel()},

@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	"github.com/hao0731/workspace-permission-management/internal/group-service/services"
 	"github.com/hao0731/workspace-permission-management/internal/group-service/transport"
 	"github.com/hao0731/workspace-permission-management/internal/shared/http/exception"
 	"github.com/hao0731/workspace-permission-management/internal/shared/pagination"
@@ -22,7 +23,7 @@ type HTTPGroupService interface {
 	AddIndividualMembers(ctx context.Context, input group.AddIndividualMembersInput) ([]group.IndividualMember, error)
 	UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput) error
 	DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput) error
-	CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, error)
+	CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, []string, error)
 	ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error)
 }
 
@@ -99,13 +100,20 @@ func (h *GroupHandler) CreateSystemGroup(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusBadRequest, validationError("request body is invalid"))
 	}
-	model, err := h.service.CreateSystemGroup(c.Request().Context(), input)
+	model, permissionErrors, err := h.service.CreateSystemGroup(c.Request().Context(), input)
 	if err != nil {
 		if errors.Is(err, group.ErrInvalidInput) {
 			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
 		}
+		if errors.Is(err, services.ErrSystemGroupPermissionWriteFailed) {
+			h.logger.Warn("failed to write system group permission relationships", "err", err, "system_id", systemID)
+			return c.JSON(http.StatusBadGateway, exception.WrapResponse(exception.New("permission_write_failed", "Failed to write permission relationships")))
+		}
 		h.logger.Warn("failed to create system group", "err", err, "system_id", systemID)
 		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	if len(permissionErrors) > 0 {
+		return c.JSON(http.StatusPartialContent, transport.NewSystemGroupCreatePartialResponse(model, permissionErrors))
 	}
 	return c.JSON(http.StatusCreated, transport.NewSystemGroupCreateResponse(model))
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ type Config struct {
 	MongoDB                       MongoDBConfig
 	NATS                          NATSConfig
 	Validation                    ValidationConfig
+	PermissionAPI                 PermissionAPIConfig
 	GroupExpiryCommand            GroupExpiryCommandConfig
 	IndividualMemberExpiryCommand IndividualMemberExpiryCommandConfig
 	ShutdownTimeout               time.Duration
@@ -34,6 +36,12 @@ type NATSConfig struct {
 type ValidationConfig struct {
 	MaxIndividualMembers int
 	MaxGroupingRules     int
+}
+
+type PermissionAPIConfig struct {
+	BaseURL      string
+	APIKey       string
+	APIKeyHeader string
 }
 
 type GroupExpiryCommandConfig struct {
@@ -99,6 +107,11 @@ func Load() (Config, error) {
 			MaxIndividualMembers: v.GetInt("GROUP_SERVICE_MAX_INDIVIDUAL_MEMBERS"),
 			MaxGroupingRules:     v.GetInt("GROUP_SERVICE_MAX_GROUPING_RULES"),
 		},
+		PermissionAPI: PermissionAPIConfig{
+			BaseURL:      v.GetString("GROUP_SERVICE_PERMISSION_API_BASE_URL"),
+			APIKey:       v.GetString("GROUP_SERVICE_PERMISSION_API_KEY"),
+			APIKeyHeader: v.GetString("GROUP_SERVICE_PERMISSION_API_KEY_HEADER"),
+		},
 		GroupExpiryCommand: GroupExpiryCommandConfig{
 			Stream:         v.GetString("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_STREAM"),
 			Durable:        v.GetString("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE"),
@@ -138,6 +151,9 @@ func (c Config) Validate() error {
 		"GROUP_SERVICE_GROUP_EXPIRY_COMMAND_DURABLE":             c.GroupExpiryCommand.Durable,
 		"GROUP_SERVICE_GROUP_EXPIRY_COMMAND_SUBJECT":             c.GroupExpiryCommand.Subject,
 		"GROUP_SERVICE_GROUP_EXPIRY_BUCKET_TIMEZONE":             c.GroupExpiryCommand.BucketTimezone,
+		"GROUP_SERVICE_PERMISSION_API_BASE_URL":                  c.PermissionAPI.BaseURL,
+		"GROUP_SERVICE_PERMISSION_API_KEY":                       c.PermissionAPI.APIKey,
+		"GROUP_SERVICE_PERMISSION_API_KEY_HEADER":                c.PermissionAPI.APIKeyHeader,
 		"GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_STREAM":  c.IndividualMemberExpiryCommand.Stream,
 		"GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_DURABLE": c.IndividualMemberExpiryCommand.Durable,
 		"GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_COMMAND_SUBJECT": c.IndividualMemberExpiryCommand.Subject,
@@ -156,6 +172,12 @@ func (c Config) Validate() error {
 	}
 	if c.Validation.MaxGroupingRules <= 0 {
 		return fmt.Errorf("GROUP_SERVICE_MAX_GROUPING_RULES must be positive")
+	}
+	if err := validatePermissionAPIBaseURL(c.PermissionAPI.BaseURL); err != nil {
+		return err
+	}
+	if !isHTTPHeaderName(strings.TrimSpace(c.PermissionAPI.APIKeyHeader)) {
+		return fmt.Errorf("GROUP_SERVICE_PERMISSION_API_KEY_HEADER must be a valid HTTP header name")
 	}
 	if c.GroupExpiryCommand.FetchCount <= 0 {
 		return fmt.Errorf("GROUP_SERVICE_GROUP_EXPIRY_COMMAND_FETCH_COUNT must be greater than zero")
@@ -176,6 +198,39 @@ func (c Config) Validate() error {
 		return fmt.Errorf("GROUP_SERVICE_INDIVIDUAL_MEMBER_EXPIRY_BUCKET_TIMEZONE must be valid")
 	}
 	return nil
+}
+
+func validatePermissionAPIBaseURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("GROUP_SERVICE_PERMISSION_API_BASE_URL must be an absolute http or https URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("GROUP_SERVICE_PERMISSION_API_BASE_URL must be an absolute http or https URL")
+	}
+	return nil
+}
+
+func isHTTPHeaderName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if strings.ContainsRune("!#$%&'*+-.^_`|~", r) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func parseExpirationBucketLocationConfig(key string, value string) (*time.Location, error) {
