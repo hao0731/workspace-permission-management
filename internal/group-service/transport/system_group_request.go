@@ -13,6 +13,11 @@ type SystemGroupCreateRequest struct {
 	GroupingRules []SystemGroupRuleRequest `json:"grouping_rules"`
 }
 
+type SystemGroupUpdateRequest struct {
+	Name          string                   `json:"name"`
+	GroupingRules []SystemGroupRuleRequest `json:"grouping_rules"`
+}
+
 type SystemGroupRuleRequest struct {
 	AttributeKey string `json:"attribute_key"`
 	Operator     string `json:"operator"`
@@ -29,18 +34,52 @@ func DecodeSystemGroupCreateRequest(body io.Reader) (SystemGroupCreateRequest, e
 	return request, nil
 }
 
-func (request SystemGroupCreateRequest) ToDomain(systemID string) (group.SystemGroupCreateInput, error) {
-	if request.GroupingRules == nil {
-		return group.SystemGroupCreateInput{}, invalidGroupRequest("grouping_rules is required")
+func DecodeSystemGroupUpdateRequest(body io.Reader) (SystemGroupUpdateRequest, error) {
+	var request SystemGroupUpdateRequest
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(&request); err != nil {
+		return SystemGroupUpdateRequest{}, fmt.Errorf("decode system group update request: %w", err)
 	}
-	rules := make([]group.SystemGroupRule, 0, len(request.GroupingRules))
-	for _, rule := range request.GroupingRules {
+	return request, nil
+}
+
+func (request SystemGroupCreateRequest) ToDomain(systemID string) (group.SystemGroupCreateInput, error) {
+	rules, err := systemGroupRulesToDomain(request.GroupingRules)
+	if err != nil {
+		return group.SystemGroupCreateInput{}, err
+	}
+	return group.SystemGroupCreateInput{
+		SystemID:      systemID,
+		Name:          request.Name,
+		GroupingRules: rules,
+	}, nil
+}
+
+func (request SystemGroupUpdateRequest) ToDomain(systemID string, groupID string) (group.SystemGroupUpdateInput, error) {
+	rules, err := systemGroupRulesToDomain(request.GroupingRules)
+	if err != nil {
+		return group.SystemGroupUpdateInput{}, err
+	}
+	return group.SystemGroupUpdateInput{
+		SystemID:      systemID,
+		GroupID:       groupID,
+		Name:          request.Name,
+		GroupingRules: rules,
+	}, nil
+}
+
+func systemGroupRulesToDomain(requestRules []SystemGroupRuleRequest) ([]group.SystemGroupRule, error) {
+	if requestRules == nil {
+		return nil, invalidGroupRequest("grouping_rules is required")
+	}
+	rules := make([]group.SystemGroupRule, 0, len(requestRules))
+	for _, rule := range requestRules {
 		if rule.Multi == nil {
-			return group.SystemGroupCreateInput{}, invalidGroupRequest("rule multi is required")
+			return nil, invalidGroupRequest("rule multi is required")
 		}
 		value, err := systemGroupRuleValue(rule.Value, *rule.Multi)
 		if err != nil {
-			return group.SystemGroupCreateInput{}, err
+			return nil, err
 		}
 		rules = append(rules, group.SystemGroupRule{
 			AttributeKey: group.GroupAttributeKey(rule.AttributeKey),
@@ -49,11 +88,7 @@ func (request SystemGroupCreateRequest) ToDomain(systemID string) (group.SystemG
 			Value:        value,
 		})
 	}
-	return group.SystemGroupCreateInput{
-		SystemID:      systemID,
-		Name:          request.Name,
-		GroupingRules: rules,
-	}, nil
+	return rules, nil
 }
 
 func systemGroupRuleValue(value any, multi bool) (any, error) {

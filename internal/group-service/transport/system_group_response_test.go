@@ -71,6 +71,49 @@ func TestNewSystemGroupCreatePartialResponse(t *testing.T) {
 	}
 }
 
+func TestNewSystemGroupUpdateResponse(t *testing.T) {
+	response := NewSystemGroupUpdateResponse(transportSystemGroupModel())
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("Marshal error = %v, want nil", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("Unmarshal error = %v, want nil", err)
+	}
+	groupBody, ok := body["group"].(map[string]any)
+	if !ok {
+		t.Fatalf("group = %#v, want object", body["group"])
+	}
+	if groupBody["name"] != "System Admins" {
+		t.Fatalf("name = %v, want System Admins", groupBody["name"])
+	}
+	if _, ok := groupBody["system_id"]; ok {
+		t.Fatal("system_id present, want omitted")
+	}
+}
+
+func TestNewSystemGroupUpdatePartialResponse(t *testing.T) {
+	response := NewSystemGroupUpdatePartialResponse(transportSystemGroupModel(), []string{"delete rejected"})
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("Marshal error = %v, want nil", err)
+	}
+	var body struct {
+		Group  map[string]any `json:"group"`
+		Errors []string       `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("Unmarshal error = %v, want nil", err)
+	}
+	if body.Group["id"] != "group-1" {
+		t.Fatalf("group id = %v, want group-1", body.Group["id"])
+	}
+	if len(body.Errors) != 1 || body.Errors[0] != "delete rejected" {
+		t.Fatalf("errors = %#v, want delete rejected", body.Errors)
+	}
+}
+
 func TestNewSystemGroupListResponse(t *testing.T) {
 	page := group.SystemGroupPage{
 		Groups:      []group.SystemGroup{transportSystemGroupModel()},

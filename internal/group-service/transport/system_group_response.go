@@ -15,6 +15,15 @@ type SystemGroupCreatePartialResponse struct {
 	Errors []string            `json:"errors"`
 }
 
+type SystemGroupUpdateResponse struct {
+	Group SystemGroupResponse `json:"group"`
+}
+
+type SystemGroupUpdatePartialResponse struct {
+	Group  SystemGroupResponse `json:"group"`
+	Errors []string            `json:"errors"`
+}
+
 type SystemGroupListResponse struct {
 	Groups   []SystemGroupResponse `json:"groups"`
 	PageInfo PageInfoResponse      `json:"page_info"`
@@ -41,6 +50,17 @@ func NewSystemGroupCreateResponse(model group.SystemGroup) SystemGroupCreateResp
 
 func NewSystemGroupCreatePartialResponse(model group.SystemGroup, errors []string) SystemGroupCreatePartialResponse {
 	return SystemGroupCreatePartialResponse{
+		Group:  newSystemGroupResponse(model),
+		Errors: append([]string(nil), errors...),
+	}
+}
+
+func NewSystemGroupUpdateResponse(model group.SystemGroup) SystemGroupUpdateResponse {
+	return SystemGroupUpdateResponse{Group: newSystemGroupResponse(model)}
+}
+
+func NewSystemGroupUpdatePartialResponse(model group.SystemGroup, errors []string) SystemGroupUpdatePartialResponse {
+	return SystemGroupUpdatePartialResponse{
 		Group:  newSystemGroupResponse(model),
 		Errors: append([]string(nil), errors...),
 	}
