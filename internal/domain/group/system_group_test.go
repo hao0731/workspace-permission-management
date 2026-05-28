@@ -138,6 +138,74 @@ func TestSystemGroupCreateInputValidateRejectsInvalidRules(t *testing.T) {
 	}
 }
 
+func validSystemGroupUpdateInput() SystemGroupUpdateInput {
+	return SystemGroupUpdateInput{
+		SystemID: " system-a ",
+		GroupID:  " group-1 ",
+		Name:     " System Admins Updated ",
+		GroupingRules: []SystemGroupRule{
+			{AttributeKey: GroupAttributeOrganization, Operator: OperatorEq, Multi: true, Value: []string{" ORG-300 ", "ORG-100"}},
+			{AttributeKey: GroupAttributeJobType, Operator: OperatorEq, Multi: false, Value: " IDL "},
+		},
+	}
+}
+
+func TestSystemGroupUpdateInputNormalize(t *testing.T) {
+	input := validSystemGroupUpdateInput().Normalize()
+
+	if input.SystemID != "system-a" {
+		t.Fatalf("SystemID = %q, want system-a", input.SystemID)
+	}
+	if input.GroupID != "group-1" {
+		t.Fatalf("GroupID = %q, want group-1", input.GroupID)
+	}
+	if input.Name != "System Admins Updated" {
+		t.Fatalf("Name = %q, want System Admins Updated", input.Name)
+	}
+	values := input.GroupingRules[0].Value.([]string)
+	if values[0] != "ORG-300" {
+		t.Fatalf("first org value = %q, want ORG-300", values[0])
+	}
+	if input.GroupingRules[1].Value.(string) != "IDL" {
+		t.Fatalf("job type = %q, want IDL", input.GroupingRules[1].Value.(string))
+	}
+}
+
+func TestSystemGroupUpdateInputValidateAcceptsValidAndEmptyRules(t *testing.T) {
+	if err := validSystemGroupUpdateInput().Normalize().Validate(); err != nil {
+		t.Fatalf("Validate error = %v, want nil", err)
+	}
+
+	emptyRules := SystemGroupUpdateInput{
+		SystemID:      "system-a",
+		GroupID:       "group-1",
+		Name:          "Everyone",
+		GroupingRules: []SystemGroupRule{},
+	}
+	if err := emptyRules.Normalize().Validate(); err != nil {
+		t.Fatalf("Validate empty rules error = %v, want nil", err)
+	}
+}
+
+func TestSystemGroupUpdateInputValidateRejectsInvalidIdentityAndName(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  SystemGroupUpdateInput
+		reason string
+	}{
+		{name: "empty system id", input: SystemGroupUpdateInput{SystemID: " ", GroupID: "group-1", Name: "Group", GroupingRules: []SystemGroupRule{}}, reason: "system id is required"},
+		{name: "empty group id", input: SystemGroupUpdateInput{SystemID: "system-a", GroupID: " ", Name: "Group", GroupingRules: []SystemGroupRule{}}, reason: "group id is required"},
+		{name: "group id has whitespace", input: SystemGroupUpdateInput{SystemID: "system-a", GroupID: "group 1", Name: "Group", GroupingRules: []SystemGroupRule{}}, reason: "group id must be a single token"},
+		{name: "empty name", input: SystemGroupUpdateInput{SystemID: "system-a", GroupID: "group-1", Name: " ", GroupingRules: []SystemGroupRule{}}, reason: "name is required"},
+		{name: "nil grouping rules", input: SystemGroupUpdateInput{SystemID: "system-a", GroupID: "group-1", Name: "Group", GroupingRules: nil}, reason: "grouping_rules is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireSystemGroupInvalidInput(t, tt.input.Normalize().Validate(), tt.reason)
+		})
+	}
+}
+
 func TestSystemGroupListQueryValidate(t *testing.T) {
 	query := SystemGroupListQuery{
 		SystemID: " system-a ",

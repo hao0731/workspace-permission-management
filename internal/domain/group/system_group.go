@@ -40,6 +40,13 @@ type SystemGroupCreateInput struct {
 	GroupingRules []SystemGroupRule
 }
 
+type SystemGroupUpdateInput struct {
+	SystemID      string
+	GroupID       string
+	Name          string
+	GroupingRules []SystemGroupRule
+}
+
 type SystemGroupCursor struct {
 	CreatedAt time.Time
 	ID        string
@@ -72,6 +79,16 @@ type SystemGroupRelationshipProjection struct {
 
 func (input SystemGroupCreateInput) Normalize() SystemGroupCreateInput {
 	input.SystemID = strings.TrimSpace(input.SystemID)
+	input.Name = strings.TrimSpace(input.Name)
+	for i := range input.GroupingRules {
+		input.GroupingRules[i] = input.GroupingRules[i].Normalize()
+	}
+	return input
+}
+
+func (input SystemGroupUpdateInput) Normalize() SystemGroupUpdateInput {
+	input.SystemID = strings.TrimSpace(input.SystemID)
+	input.GroupID = strings.TrimSpace(input.GroupID)
 	input.Name = strings.TrimSpace(input.Name)
 	for i := range input.GroupingRules {
 		input.GroupingRules[i] = input.GroupingRules[i].Normalize()
