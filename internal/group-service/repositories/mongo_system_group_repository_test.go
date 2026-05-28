@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -77,6 +78,32 @@ func TestNewSystemGroupRelationshipDocumentMapping(t *testing.T) {
 	}
 	if len(doc.Relationships) != 1 || doc.Relationships[0].Checksum != "checksum-1" {
 		t.Fatalf("relationships = %+v, want checksum", doc.Relationships)
+	}
+}
+
+func TestSystemGroupRelationshipDocumentToDomain(t *testing.T) {
+	projection := repositorySystemGroupProjection()
+	doc, err := newSystemGroupRelationshipDocument(projection)
+	if err != nil {
+		t.Fatalf("newSystemGroupRelationshipDocument error = %v, want nil", err)
+	}
+
+	model := doc.toDomain()
+	if model.SystemID != "system-a" || model.GroupID != "group-1" {
+		t.Fatalf("model = %+v, want projection identity", model)
+	}
+	if len(model.Relationships) != 1 || model.Relationships[0].Checksum != "checksum-1" {
+		t.Fatalf("relationships = %+v, want checksum-1", model.Relationships)
+	}
+}
+
+func TestNewSystemGroupRelationshipInfoDocuments(t *testing.T) {
+	docs, err := newSystemGroupRelationshipInfoDocuments(repositorySystemGroupProjection().Relationships)
+	if err != nil {
+		t.Fatalf("newSystemGroupRelationshipInfoDocuments error = %v, want nil", err)
+	}
+	if len(docs) != 1 || docs[0].Checksum != "checksum-1" {
+		t.Fatalf("docs = %+v, want checksum-1", docs)
 	}
 }
 
@@ -182,6 +209,22 @@ func TestSystemGroupIndexModels(t *testing.T) {
 	}
 }
 
+func TestBuildSystemGroupIdentityFilter(t *testing.T) {
+	filter := buildSystemGroupIdentityFilter("system-a", "group-1")
+	want := bson.M{"system_id": "system-a", "_id": "group-1"}
+	if !reflect.DeepEqual(filter, want) {
+		t.Fatalf("filter = %#v, want %#v", filter, want)
+	}
+}
+
+func TestBuildSystemGroupRelationshipIdentityFilter(t *testing.T) {
+	filter := buildSystemGroupRelationshipIdentityFilter("system-a", "group-1")
+	want := bson.M{"system_id": "system-a", "group_id": "group-1"}
+	if !reflect.DeepEqual(filter, want) {
+		t.Fatalf("filter = %#v, want %#v", filter, want)
+	}
+}
+
 func TestBuildSystemGroupListFilter(t *testing.T) {
 	cursorTime := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
 	filter := buildSystemGroupListFilter(group.SystemGroupListQuery{
@@ -243,6 +286,73 @@ func TestMongoGroupRepositoryCreateAndListSystemGroupsIntegration(t *testing.T) 
 	}
 	if count != 1 {
 		t.Fatalf("relationship docs = %d, want 1", count)
+	}
+}
+
+func TestMongoGroupRepositoryGetAndUpdateSystemGroupIntegration(t *testing.T) {
+	ctx := context.Background()
+	repository := newIntegrationRepository(t)
+	if err := repository.EnsureIndexes(ctx); err != nil {
+		t.Fatalf("EnsureIndexes error = %v", err)
+	}
+
+	created := repositorySystemGroup()
+	projection := repositorySystemGroupProjection()
+	if _, err := repository.CreateSystemGroup(ctx, created, projection); err != nil {
+		t.Fatalf("CreateSystemGroup error = %v", err)
+	}
+
+	gotGroup, gotProjection, err := repository.GetSystemGroupWithRelationships(ctx, "system-a", "group-1")
+	if err != nil {
+		t.Fatalf("GetSystemGroupWithRelationships error = %v", err)
+	}
+	if gotGroup.ID != "group-1" || gotProjection.GroupID != "group-1" {
+		t.Fatalf("got group/projection = %+v/%+v, want group-1", gotGroup, gotProjection)
+	}
+
+	updated := gotGroup
+	updated.Name = "Updated Admins"
+	updated.GroupingRules = []group.SystemGroupRule{{
+		AttributeKey: group.GroupAttributeJobType,
+		Operator:     group.OperatorEq,
+		Multi:        false,
+		Value:        group.SystemGroupJobTypeIDL,
+	}}
+	updated.UpdatedAt = gotGroup.UpdatedAt.Add(time.Hour)
+	updatedProjection := gotProjection
+	updatedProjection.Relationships = []group.RelationshipInfo{{
+		Relationship: map[string]any{"relation": "checked_member"},
+		Checksum:     "checksum-2",
+	}}
+	updatedProjection.UpdatedAt = updated.UpdatedAt
+
+	saved, err := repository.UpdateSystemGroup(ctx, updated, updatedProjection)
+	if err != nil {
+		t.Fatalf("UpdateSystemGroup error = %v", err)
+	}
+	if saved.Name != "Updated Admins" || !saved.CreatedAt.Equal(created.CreatedAt) {
+		t.Fatalf("saved = %+v, want updated name and preserved created_at", saved)
+	}
+
+	gotGroup, gotProjection, err = repository.GetSystemGroupWithRelationships(ctx, "system-a", "group-1")
+	if err != nil {
+		t.Fatalf("Get after update error = %v", err)
+	}
+	if gotGroup.Name != "Updated Admins" {
+		t.Fatalf("group name = %q, want Updated Admins", gotGroup.Name)
+	}
+	if len(gotProjection.Relationships) != 1 || gotProjection.Relationships[0].Checksum != "checksum-2" {
+		t.Fatalf("projection = %+v, want checksum-2", gotProjection)
+	}
+}
+
+func TestMongoGroupRepositoryGetSystemGroupWithRelationshipsNotFound(t *testing.T) {
+	ctx := context.Background()
+	repository := newIntegrationRepository(t)
+
+	_, _, err := repository.GetSystemGroupWithRelationships(ctx, "system-a", "missing")
+	if !errors.Is(err, group.ErrNotFound) {
+		t.Fatalf("GetSystemGroupWithRelationships error = %v, want ErrNotFound", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -89,6 +90,76 @@ func (r *MongoGroupRepository) CreateSystemGroup(ctx context.Context, model grou
 	return model, nil
 }
 
+func (r *MongoGroupRepository) GetSystemGroupWithRelationships(ctx context.Context, systemID string, groupID string) (group.SystemGroup, group.SystemGroupRelationshipProjection, error) {
+	var groupDoc systemGroupDocument
+	if err := r.systemGroups.FindOne(ctx, buildSystemGroupIdentityFilter(systemID, groupID)).Decode(&groupDoc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, group.ErrNotFound
+		}
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, fmt.Errorf("find system group: %w", err)
+	}
+
+	var relationshipDoc systemGroupRelationshipDocument
+	if err := r.systemGroupRelationships.FindOne(ctx, buildSystemGroupRelationshipIdentityFilter(systemID, groupID)).Decode(&relationshipDoc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, group.ErrNotFound
+		}
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, fmt.Errorf("find system group relationships: %w", err)
+	}
+
+	return groupDoc.toDomain(), relationshipDoc.toDomain(), nil
+}
+
+func (r *MongoGroupRepository) UpdateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error) {
+	relationships, err := newSystemGroupRelationshipInfoDocuments(projection.Relationships)
+	if err != nil {
+		return group.SystemGroup{}, err
+	}
+
+	session, err := r.client.StartSession()
+	if err != nil {
+		return group.SystemGroup{}, fmt.Errorf("start system group update session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	if _, err := session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
+		groupResult, updateErr := r.systemGroups.UpdateOne(
+			sessionCtx,
+			buildSystemGroupIdentityFilter(model.SystemID, model.ID),
+			bson.M{"$set": bson.M{
+				"name":           model.Name,
+				"grouping_rules": newSystemGroupDocument(model).GroupingRules,
+				"updated_at":     model.UpdatedAt,
+			}},
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("update system group: %w", updateErr)
+		}
+		if groupResult.MatchedCount == 0 {
+			return nil, group.ErrNotFound
+		}
+
+		relationshipResult, updateErr := r.systemGroupRelationships.UpdateOne(
+			sessionCtx,
+			buildSystemGroupRelationshipIdentityFilter(projection.SystemID, projection.GroupID),
+			bson.M{"$set": bson.M{
+				"relationship": relationships,
+				"updated_at":   projection.UpdatedAt,
+			}},
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("update system group relationships: %w", updateErr)
+		}
+		if relationshipResult.MatchedCount == 0 {
+			return nil, group.ErrNotFound
+		}
+		return nil, nil
+	}); err != nil {
+		return group.SystemGroup{}, err
+	}
+	return model, nil
+}
+
 func (r *MongoGroupRepository) ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error) {
 	findOptions := options.Find().
 		SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}).
@@ -139,6 +210,14 @@ func buildSystemGroupListFilter(query group.SystemGroupListQuery) bson.M {
 	return filter
 }
 
+func buildSystemGroupIdentityFilter(systemID string, groupID string) bson.M {
+	return bson.M{"system_id": systemID, "_id": groupID}
+}
+
+func buildSystemGroupRelationshipIdentityFilter(systemID string, groupID string) bson.M {
+	return bson.M{"system_id": systemID, "group_id": groupID}
+}
+
 func newSystemGroupDocument(model group.SystemGroup) systemGroupDocument {
 	rules := make([]systemGroupRuleDocument, 0, len(model.GroupingRules))
 	for _, rule := range model.GroupingRules {
@@ -180,16 +259,9 @@ func (d systemGroupDocument) toDomain() group.SystemGroup {
 }
 
 func newSystemGroupRelationshipDocument(model group.SystemGroupRelationshipProjection) (systemGroupRelationshipDocument, error) {
-	relationships := make([]systemGroupRelationshipInfoDocument, 0, len(model.Relationships))
-	for _, relationship := range model.Relationships {
-		relationshipDoc, err := newSystemGroupRelationshipValueDocument(relationship.Relationship)
-		if err != nil {
-			return systemGroupRelationshipDocument{}, err
-		}
-		relationships = append(relationships, systemGroupRelationshipInfoDocument{
-			Relationship: relationshipDoc,
-			Checksum:     relationship.Checksum,
-		})
+	relationships, err := newSystemGroupRelationshipInfoDocuments(model.Relationships)
+	if err != nil {
+		return systemGroupRelationshipDocument{}, err
 	}
 	return systemGroupRelationshipDocument{
 		SystemID:      model.SystemID,
@@ -198,6 +270,38 @@ func newSystemGroupRelationshipDocument(model group.SystemGroupRelationshipProje
 		CreatedAt:     model.CreatedAt,
 		UpdatedAt:     model.UpdatedAt,
 	}, nil
+}
+
+func newSystemGroupRelationshipInfoDocuments(infos []group.RelationshipInfo) ([]systemGroupRelationshipInfoDocument, error) {
+	relationships := make([]systemGroupRelationshipInfoDocument, 0, len(infos))
+	for _, relationship := range infos {
+		relationshipDoc, err := newSystemGroupRelationshipValueDocument(relationship.Relationship)
+		if err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, systemGroupRelationshipInfoDocument{
+			Relationship: relationshipDoc,
+			Checksum:     relationship.Checksum,
+		})
+	}
+	return relationships, nil
+}
+
+func (d systemGroupRelationshipDocument) toDomain() group.SystemGroupRelationshipProjection {
+	relationships := make([]group.RelationshipInfo, 0, len(d.Relationships))
+	for _, relationship := range d.Relationships {
+		relationships = append(relationships, group.RelationshipInfo{
+			Relationship: relationship.Relationship,
+			Checksum:     relationship.Checksum,
+		})
+	}
+	return group.SystemGroupRelationshipProjection{
+		SystemID:      d.SystemID,
+		GroupID:       d.GroupID,
+		Relationships: relationships,
+		CreatedAt:     d.CreatedAt,
+		UpdatedAt:     d.UpdatedAt,
+	}
 }
 
 func newSystemGroupRelationshipValueDocument(relationship any) (systemGroupRelationshipValueDocument, error) {
