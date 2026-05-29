@@ -224,9 +224,6 @@ func (s *SystemGroupService) writeSystemGroupRelationshipUpdates(ctx context.Con
 	if err != nil {
 		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, err
 	}
-	adjustedModel.Name = model.Name
-	adjustedModel.CreatedAt = model.CreatedAt
-	adjustedModel.UpdatedAt = model.UpdatedAt
 
 	s.logger.WarnContext(ctx, "permission API relationship update partially failed",
 		"system_id", model.SystemID,
