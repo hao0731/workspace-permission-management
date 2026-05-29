@@ -24,6 +24,7 @@ type HTTPGroupService interface {
 	UpdateIndividualMemberExpiration(ctx context.Context, input group.UpdateIndividualMemberExpirationInput) error
 	DeleteIndividualMember(ctx context.Context, input group.DeleteIndividualMemberInput) error
 	CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, []string, error)
+	UpdateSystemGroup(ctx context.Context, input group.SystemGroupUpdateInput) (group.SystemGroup, []string, error)
 	ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error)
 }
 
@@ -52,6 +53,7 @@ func RegisterRoutes(e *echo.Echo, handler *GroupHandler) {
 	e.PATCH("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account", handler.UpdateIndividualMemberExpiration)
 	e.DELETE("/api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account", handler.DeleteIndividualMember)
 	e.POST("/api/v1/systems/:system_id/groups", handler.CreateSystemGroup)
+	e.PUT("/api/v1/systems/:system_id/groups/:group_id", handler.UpdateSystemGroup)
 	e.GET("/api/v1/systems/:system_id/groups", handler.ListSystemGroups)
 }
 
@@ -116,6 +118,42 @@ func (h *GroupHandler) CreateSystemGroup(c *echo.Context) error {
 		return c.JSON(http.StatusPartialContent, transport.NewSystemGroupCreatePartialResponse(model, permissionErrors))
 	}
 	return c.JSON(http.StatusCreated, transport.NewSystemGroupCreateResponse(model))
+}
+
+func (h *GroupHandler) UpdateSystemGroup(c *echo.Context) error {
+	systemID := c.Param("system_id")
+	groupID := c.Param("group_id")
+	request, err := transport.DecodeSystemGroupUpdateRequest(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, validationError("request body must be valid JSON"))
+	}
+	input, err := request.ToDomain(systemID, groupID)
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		return c.JSON(http.StatusBadRequest, validationError("request body is invalid"))
+	}
+
+	model, permissionErrors, err := h.service.UpdateSystemGroup(c.Request().Context(), input)
+	if err != nil {
+		if errors.Is(err, group.ErrInvalidInput) {
+			return c.JSON(http.StatusBadRequest, validationError(err.Error()))
+		}
+		if errors.Is(err, group.ErrNotFound) {
+			return c.JSON(http.StatusNotFound, exception.WrapResponse(exception.New("not_found", "System group not found", exception.WithDetails(map[string]any{}))))
+		}
+		if errors.Is(err, services.ErrSystemGroupPermissionWriteFailed) {
+			h.logger.Warn("failed to update system group permission relationships", "err", err, "system_id", systemID, "group_id", groupID)
+			return c.JSON(http.StatusBadGateway, exception.WrapResponse(exception.New("permission_write_failed", "Failed to write permission relationships")))
+		}
+		h.logger.Warn("failed to update system group", "err", err, "system_id", systemID, "group_id", groupID)
+		return c.JSON(http.StatusInternalServerError, exception.WrapResponse(exception.New("internal_error", "Internal server error")))
+	}
+	if len(permissionErrors) > 0 {
+		return c.JSON(http.StatusPartialContent, transport.NewSystemGroupUpdatePartialResponse(model, permissionErrors))
+	}
+	return c.JSON(http.StatusOK, transport.NewSystemGroupUpdateResponse(model))
 }
 
 func (h *GroupHandler) GetGroup(c *echo.Context) error {
