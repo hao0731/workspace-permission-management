@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hao0731/workspace-permission-management/internal/domain/group"
+	permission "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission"
 	"github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/caveat"
 	permissionrelation "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/relation"
 	permissionrelationship "github.com/hao0731/workspace-permission-management/internal/shared/interactions/permission/relationship"
@@ -77,6 +78,88 @@ func relationshipChecksum(relationship any) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func newSystemGroupRelationshipUpdateTasks(current group.SystemGroupRelationshipProjection, desired group.SystemGroupRelationshipProjection) ([]permission.RelationshipTask, error) {
+	currentByChecksum := relationshipInfoByChecksum(current.Relationships)
+	desiredByChecksum := relationshipInfoByChecksum(desired.Relationships)
+
+	tasks := make([]permission.RelationshipTask, 0)
+	for _, info := range desired.Relationships {
+		if _, exists := currentByChecksum[info.Checksum]; exists {
+			continue
+		}
+		relationship, err := permissionRelationshipValue(info.Relationship)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, permission.RelationshipTask{
+			Operator:     permission.RelationshipOperationCreate,
+			Relationship: relationship,
+		})
+	}
+	for _, info := range current.Relationships {
+		if _, exists := desiredByChecksum[info.Checksum]; exists {
+			continue
+		}
+		relationship, err := permissionRelationshipValue(info.Relationship)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, permission.RelationshipTask{
+			Operator:     permission.RelationshipOperationDelete,
+			Relationship: relationship,
+		})
+	}
+	return tasks, nil
+}
+
+func applyFailedSystemGroupRelationshipUpdateTasks(current group.SystemGroupRelationshipProjection, desired group.SystemGroupRelationshipProjection, failedTasks []permission.FailedRelationshipTask) (group.SystemGroupRelationshipProjection, []string, error) {
+	failedCreates := map[string]struct{}{}
+	failedDeletes := map[string]struct{}{}
+	permissionErrors := make([]string, 0, len(failedTasks))
+	for _, task := range failedTasks {
+		checksum, err := relationshipChecksum(task.Relationship)
+		if err != nil {
+			return group.SystemGroupRelationshipProjection{}, nil, err
+		}
+		switch task.Operator {
+		case permission.RelationshipOperationCreate:
+			failedCreates[checksum] = struct{}{}
+		case permission.RelationshipOperationDelete:
+			failedDeletes[checksum] = struct{}{}
+		}
+		permissionErrors = append(permissionErrors, task.Error)
+	}
+
+	desiredByChecksum := relationshipInfoByChecksum(desired.Relationships)
+	finalRelationships := make([]group.RelationshipInfo, 0, len(desired.Relationships)+len(failedDeletes))
+	for _, info := range desired.Relationships {
+		if _, failed := failedCreates[info.Checksum]; failed {
+			continue
+		}
+		finalRelationships = append(finalRelationships, info)
+	}
+	for _, info := range current.Relationships {
+		if _, stillDesired := desiredByChecksum[info.Checksum]; stillDesired {
+			continue
+		}
+		if _, failed := failedDeletes[info.Checksum]; failed {
+			finalRelationships = append(finalRelationships, info)
+		}
+	}
+
+	finalProjection := desired
+	finalProjection.Relationships = finalRelationships
+	return finalProjection, permissionErrors, nil
+}
+
+func relationshipInfoByChecksum(infos []group.RelationshipInfo) map[string]group.RelationshipInfo {
+	out := make(map[string]group.RelationshipInfo, len(infos))
+	for _, info := range infos {
+		out[info.Checksum] = info
+	}
+	return out
 }
 
 func dedupeSystemGroupRuleValues(rules []group.SystemGroupRule, key group.GroupAttributeKey, exclude string) []string {

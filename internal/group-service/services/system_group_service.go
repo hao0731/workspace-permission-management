@@ -17,6 +17,8 @@ var ErrSystemGroupPermissionWriteFailed = errors.New("system group permission wr
 
 type SystemGroupRepository interface {
 	CreateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error)
+	GetSystemGroupWithRelationships(ctx context.Context, systemID string, groupID string) (group.SystemGroup, group.SystemGroupRelationshipProjection, error)
+	UpdateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error)
 	ListSystemGroups(ctx context.Context, query group.SystemGroupListQuery) (group.SystemGroupPage, error)
 }
 
@@ -122,6 +124,45 @@ func (s *SystemGroupService) ListSystemGroups(ctx context.Context, query group.S
 	return page, nil
 }
 
+func (s *SystemGroupService) UpdateSystemGroup(ctx context.Context, input group.SystemGroupUpdateInput) (group.SystemGroup, []string, error) {
+	now := s.now().UTC()
+	input = input.Normalize()
+	if err := input.Validate(); err != nil {
+		return group.SystemGroup{}, nil, err
+	}
+
+	current, currentProjection, err := s.repository.GetSystemGroupWithRelationships(ctx, input.SystemID, input.GroupID)
+	if err != nil {
+		return group.SystemGroup{}, nil, fmt.Errorf("get system group for update: %w", err)
+	}
+
+	model := group.SystemGroup{
+		ID:            current.ID,
+		SystemID:      current.SystemID,
+		Name:          input.Name,
+		GroupingRules: input.GroupingRules,
+		CreatedAt:     current.CreatedAt,
+		UpdatedAt:     now,
+	}
+	desiredProjection, err := buildSystemGroupRelationshipProjection(model.SystemID, model.ID, model.GroupingRules, now)
+	if err != nil {
+		return group.SystemGroup{}, nil, err
+	}
+	desiredProjection.CreatedAt = currentProjection.CreatedAt
+	desiredProjection.UpdatedAt = now
+
+	model, desiredProjection, permissionErrors, err := s.writeSystemGroupRelationshipUpdates(ctx, model, currentProjection, desiredProjection)
+	if err != nil {
+		return group.SystemGroup{}, nil, err
+	}
+
+	saved, err := s.repository.UpdateSystemGroup(ctx, model, desiredProjection)
+	if err != nil {
+		return group.SystemGroup{}, nil, fmt.Errorf("update system group: %w", err)
+	}
+	return saved, permissionErrors, nil
+}
+
 func (s *SystemGroupService) writeSystemGroupRelationships(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, group.SystemGroupRelationshipProjection, []string, error) {
 	if s.permissionClient == nil {
 		err := errors.New("permission client is not configured")
@@ -153,6 +194,44 @@ func (s *SystemGroupService) writeSystemGroupRelationships(ctx context.Context, 
 		"errors", permissionErrors,
 	)
 	return adjustedModel, filteredProjection, permissionErrors, nil
+}
+
+func (s *SystemGroupService) writeSystemGroupRelationshipUpdates(ctx context.Context, model group.SystemGroup, currentProjection group.SystemGroupRelationshipProjection, desiredProjection group.SystemGroupRelationshipProjection) (group.SystemGroup, group.SystemGroupRelationshipProjection, []string, error) {
+	tasks, err := newSystemGroupRelationshipUpdateTasks(currentProjection, desiredProjection)
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, err
+	}
+	if len(tasks) == 0 {
+		return model, desiredProjection, nil, nil
+	}
+	if s.permissionClient == nil {
+		configErr := errors.New("permission client is not configured")
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, fmt.Errorf("%w: %w", ErrSystemGroupPermissionWriteFailed, configErr)
+	}
+	result, err := s.permissionClient.WriteRelationships(ctx, permission.WriteRelationshipsParameter{Tasks: tasks})
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, fmt.Errorf("%w: %w", ErrSystemGroupPermissionWriteFailed, err)
+	}
+	if len(result.FailedTasks) == 0 {
+		return model, desiredProjection, nil, nil
+	}
+
+	finalProjection, permissionErrors, err := applyFailedSystemGroupRelationshipUpdateTasks(currentProjection, desiredProjection, result.FailedTasks)
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, err
+	}
+	adjustedModel, err := rebuildSystemGroupFromRelationshipProjection(model, finalProjection)
+	if err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, nil, err
+	}
+
+	s.logger.WarnContext(ctx, "permission API relationship update partially failed",
+		"system_id", model.SystemID,
+		"group_id", model.ID,
+		"failed_task_count", len(result.FailedTasks),
+		"errors", permissionErrors,
+	)
+	return adjustedModel, finalProjection, permissionErrors, nil
 }
 
 func newSystemGroupRelationshipCreateTasks(projection group.SystemGroupRelationshipProjection) ([]permission.RelationshipTask, error) {

@@ -26,6 +26,7 @@ type fakeHTTPGroupService struct {
 	memberUpdate      group.UpdateIndividualMemberExpirationInput
 	memberDelete      group.DeleteIndividualMemberInput
 	systemGroupInput  group.SystemGroupCreateInput
+	systemGroupUpdate group.SystemGroupUpdateInput
 	systemGroupQuery  group.SystemGroupListQuery
 	model             group.Group
 	groupPtr          *group.Group
@@ -44,6 +45,7 @@ type fakeHTTPGroupService struct {
 	memberUpdCalls    int
 	memberDelCalls    int
 	systemCreateCalls int
+	systemUpdateCalls int
 	systemListCalls   int
 }
 
@@ -110,6 +112,15 @@ func (f *fakeHTTPGroupService) DeleteIndividualMember(ctx context.Context, input
 func (f *fakeHTTPGroupService) CreateSystemGroup(ctx context.Context, input group.SystemGroupCreateInput) (group.SystemGroup, []string, error) {
 	f.systemCreateCalls++
 	f.systemGroupInput = input
+	if f.err != nil {
+		return group.SystemGroup{}, nil, f.err
+	}
+	return f.systemGroupModel, f.systemGroupErrors, nil
+}
+
+func (f *fakeHTTPGroupService) UpdateSystemGroup(ctx context.Context, input group.SystemGroupUpdateInput) (group.SystemGroup, []string, error) {
+	f.systemUpdateCalls++
+	f.systemGroupUpdate = input
 	if f.err != nil {
 		return group.SystemGroup{}, nil, f.err
 	}
@@ -627,6 +638,96 @@ func TestGroupHandlerCreateSystemGroupValidationError(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestGroupHandlerUpdateSystemGroup(t *testing.T) {
+	service := &fakeHTTPGroupService{systemGroupModel: systemGroupHandlerModel()}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/systems/system-a/groups/group-1", strings.NewReader(validSystemGroupRequestBody()))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if service.systemUpdateCalls != 1 || service.systemGroupUpdate.SystemID != "system-a" || service.systemGroupUpdate.GroupID != "group-1" {
+		t.Fatalf("service calls/input = %d/%+v, want system update", service.systemUpdateCalls, service.systemGroupUpdate)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := body["group"]; !ok {
+		t.Fatal("response missing group")
+	}
+}
+
+func TestGroupHandlerUpdateSystemGroupPartialPermissionFailure(t *testing.T) {
+	service := &fakeHTTPGroupService{
+		systemGroupModel:  systemGroupHandlerModel(),
+		systemGroupErrors: []string{"delete rejected"},
+	}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/systems/system-a/groups/group-1", strings.NewReader(validSystemGroupRequestBody()))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206", rec.Code)
+	}
+	var body struct {
+		Group  map[string]any `json:"group"`
+		Errors []string       `json:"errors"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Group["id"] != "group-1" {
+		t.Fatalf("group id = %v, want group-1", body.Group["id"])
+	}
+	if len(body.Errors) != 1 || body.Errors[0] != "delete rejected" {
+		t.Fatalf("errors = %#v, want delete rejected", body.Errors)
+	}
+}
+
+func TestGroupHandlerUpdateSystemGroupNotFound(t *testing.T) {
+	service := &fakeHTTPGroupService{err: group.ErrNotFound}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/systems/system-a/groups/missing", strings.NewReader(validSystemGroupRequestBody()))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var body map[string]map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"]["code"] != "not_found" {
+		t.Fatalf("error code = %v, want not_found", body["error"]["code"])
+	}
+}
+
+func TestGroupHandlerUpdateSystemGroupPermissionWriteFailure(t *testing.T) {
+	service := &fakeHTTPGroupService{err: services.ErrSystemGroupPermissionWriteFailed}
+	e := echo.New()
+	RegisterRoutes(e, NewGroupHandler(service, newTestLogger(), pagination.New()))
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/systems/system-a/groups/group-1", strings.NewReader(validSystemGroupRequestBody()))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
 	}
 }
 

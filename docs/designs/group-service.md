@@ -11,7 +11,7 @@ This document is the entry point for `group-service`. Endpoint-family details ar
 - [Group Expiry Command Design](group-service-group-expiry-command.md): grouping-rule expiry tasks, JetStream command contract, and idempotent command handling.
 - [Group Individual Member Expiry Command Design](group-service-individual-member-expiry-command.md): individual-member expiry tasks, JetStream command contract, and idempotent command handling.
 - [Group Expiry Scheduler Design](group-expiry-scheduler.md): independent scheduler service that scans expiry task collections and publishes the existing expiry command events.
-- [System Group API Design](system-group-api-design.md): system-scoped group creation, paginated system group list, and permission relationship projection persistence.
+- [System Group API Design](system-group-api-design.md): system-scoped group creation, update, paginated system group list, and permission relationship projection persistence.
 
 Related context:
 
@@ -50,6 +50,7 @@ Policy alignment:
 - Use soft deletion through `deleted_at` for both groups and individual members.
 - Keep create and delete operations that touch both collections atomic through MongoDB transactions.
 - Keep system group creation atomic across `system_groups` and `system_group_relationships` through MongoDB transactions.
+- Keep system group updates atomic across `system_groups` and `system_group_relationships` through MongoDB transactions after permission API relationship writes are resolved.
 - Keep individual member add, expiration update, and delete workflows scoped to an active group and atomic through MongoDB transactions.
 - Keep grouping-rule creation, replacement, expiration task writes, and expiry command cleanup atomic through MongoDB transactions.
 - Keep individual-member creation, expiration update, expiration task writes, and expiry command cleanup atomic through MongoDB transactions.
@@ -71,7 +72,8 @@ Policy alignment:
 | `POST /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members` | [Group Individual Members API Design](group-service-individual-members.md#add-individual-members-api) | `201 Created` with added `members` | `404 Not Found` |
 | `PATCH /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account` | [Group Individual Members API Design](group-service-individual-members.md#update-individual-member-expiration-api) | `204 No Content` | `404 Not Found` |
 | `DELETE /api/v1/workspaces/:workspace_id/groups/:group_id/individual-members/:nt_account` | [Group Individual Members API Design](group-service-individual-members.md#delete-individual-member-api) | `204 No Content` | `204 No Content` |
-| `POST /api/v1/systems/:system_id/groups` | [System Group API Design](system-group-api-design.md#create-system-group) | `201 Created` with the created system group payload | Not applicable |
+| `POST /api/v1/systems/:system_id/groups` | [System Group API Design](system-group-api-design.md#create-system-group) | `201 Created` with the created system group payload, or `206 Partial Content` when permission relationship tasks partially fail | Not applicable |
+| `PUT /api/v1/systems/:system_id/groups/:group_id` | [System Group API Design](system-group-api-design.md#update-system-group) | `200 OK` with the saved system group payload, or `206 Partial Content` when permission relationship tasks partially fail | `404 Not Found` |
 | `GET /api/v1/systems/:system_id/groups` | [System Group API Design](system-group-api-design.md#list-system-groups) | `200 OK` with `groups` and `page_info` | `200 OK` with an empty page |
 
 Common API conventions:
@@ -164,8 +166,9 @@ Known errors should use this response shape:
 Common status mapping:
 
 - `400 Bad Request`: malformed JSON, invalid query parameters, invalid request shape, invalid field values, configured limit violations, or expiration dates that are not in the future.
-- `404 Not Found`: mutation operations whose required active group or active member target does not exist, except intentionally idempotent delete operations.
+- `404 Not Found`: mutation operations whose required active group, active member, or saved system group relationship projection does not exist, except intentionally idempotent delete operations.
 - `409 Conflict`: active group name already exists in the same workspace during create, a member add request contains duplicate accounts, or an active individual member already exists in the same group during member add.
+- `502 Bad Gateway`: permission API request-level failure before local system group persistence.
 - `500 Internal Server Error`: unexpected repository, transaction, or infrastructure failure.
 
 `DELETE /groups/:group_id` and `DELETE /groups/:group_id/individual-members/:nt_account` are intentionally idempotent and return `204` even when the active target is already missing.
@@ -259,6 +262,7 @@ The implementation should keep `examples/api/groups.http` aligned with all group
 - Individual member add conflict and invalid expiration validation.
 
 The implementation should add `examples/api/system-groups.http` for system-scoped group APIs. It should include successful create, empty-rule create, paginated list, empty list, unsupported `not_eq`, duplicate `job_type`, invalid `limit`, and invalid `next_token` examples.
+It should also include successful system group update, partial permission-write update, and update target-not-found examples.
 
 ## Testing Strategy
 

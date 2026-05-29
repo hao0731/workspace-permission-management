@@ -17,13 +17,19 @@ import (
 )
 
 type fakeSystemGroupRepository struct {
-	createGroup      group.SystemGroup
-	createProjection group.SystemGroupRelationshipProjection
-	listQuery        group.SystemGroupListQuery
-	page             group.SystemGroupPage
-	err              error
-	createCalls      int
-	listCalls        int
+	createGroup       group.SystemGroup
+	createProjection  group.SystemGroupRelationshipProjection
+	currentGroup      group.SystemGroup
+	currentProjection group.SystemGroupRelationshipProjection
+	updateGroup       group.SystemGroup
+	updateProjection  group.SystemGroupRelationshipProjection
+	listQuery         group.SystemGroupListQuery
+	page              group.SystemGroupPage
+	err               error
+	createCalls       int
+	getCalls          int
+	updateCalls       int
+	listCalls         int
 }
 
 type fakeSystemGroupPermissionClient struct {
@@ -39,7 +45,7 @@ type fakeSystemGroupPermissionClient struct {
 func (f *fakeSystemGroupPermissionClient) WriteRelationships(ctx context.Context, parameter permission.WriteRelationshipsParameter) (permission.WriteRelationshipsResult, error) {
 	f.calls++
 	f.parameter = parameter
-	if f.repo != nil && f.repo.createCalls == 0 {
+	if f.repo != nil && f.repo.createCalls == 0 && f.repo.updateCalls == 0 {
 		f.calledBeforeRepository = true
 	}
 	if f.err != nil {
@@ -55,6 +61,27 @@ func (f *fakeSystemGroupRepository) CreateSystemGroup(ctx context.Context, model
 	f.createCalls++
 	f.createGroup = model
 	f.createProjection = projection
+	if f.err != nil {
+		return group.SystemGroup{}, f.err
+	}
+	return model, nil
+}
+
+func (f *fakeSystemGroupRepository) GetSystemGroupWithRelationships(ctx context.Context, systemID string, groupID string) (group.SystemGroup, group.SystemGroupRelationshipProjection, error) {
+	f.getCalls++
+	if f.err != nil {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, f.err
+	}
+	if f.currentGroup.ID == "" {
+		return group.SystemGroup{}, group.SystemGroupRelationshipProjection{}, group.ErrNotFound
+	}
+	return f.currentGroup, f.currentProjection, nil
+}
+
+func (f *fakeSystemGroupRepository) UpdateSystemGroup(ctx context.Context, model group.SystemGroup, projection group.SystemGroupRelationshipProjection) (group.SystemGroup, error) {
+	f.updateCalls++
+	f.updateGroup = model
+	f.updateProjection = projection
 	if f.err != nil {
 		return group.SystemGroup{}, f.err
 	}
@@ -82,6 +109,48 @@ func validServiceSystemGroupInput() group.SystemGroupCreateInput {
 			{AttributeKey: group.GroupAttributeOrganization, Operator: group.OperatorEq, Multi: true, Value: []string{"ORG-200", "ORG-100", "ORG-100"}},
 			{AttributeKey: group.GroupAttributeJobLevel, Operator: group.OperatorEq, Multi: false, Value: "M2"},
 			{AttributeKey: group.GroupAttributeJobTag, Operator: group.OperatorEq, Multi: true, Value: []string{"a4_reviewer", group.SystemGroupSecretarySentinel}},
+		},
+	}
+}
+
+func existingServiceSystemGroup() group.SystemGroup {
+	return group.SystemGroup{
+		ID:       "group-1",
+		SystemID: "system-a",
+		Name:     "System Admins",
+		GroupingRules: []group.SystemGroupRule{{
+			AttributeKey: group.GroupAttributeOrganization,
+			Operator:     group.OperatorEq,
+			Multi:        true,
+			Value:        []string{"ORG-100"},
+		}},
+		CreatedAt: fixedSystemGroupNow().Add(-time.Hour),
+		UpdatedAt: fixedSystemGroupNow().Add(-time.Hour),
+	}
+}
+
+func existingServiceProjection(t *testing.T) group.SystemGroupRelationshipProjection {
+	t.Helper()
+	projection, err := buildSystemGroupRelationshipProjection(
+		"system-a",
+		"group-1",
+		existingServiceSystemGroup().GroupingRules,
+		fixedSystemGroupNow().Add(-time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("build current projection: %v", err)
+	}
+	return projection
+}
+
+func validServiceSystemGroupUpdateInput() group.SystemGroupUpdateInput {
+	return group.SystemGroupUpdateInput{
+		SystemID: "system-a",
+		GroupID:  "group-1",
+		Name:     "Updated Admins",
+		GroupingRules: []group.SystemGroupRule{
+			{AttributeKey: group.GroupAttributeOrganization, Operator: group.OperatorEq, Multi: true, Value: []string{"ORG-300"}},
+			{AttributeKey: group.GroupAttributeJobType, Operator: group.OperatorEq, Multi: false, Value: group.SystemGroupJobTypeIDL},
 		},
 	}
 }
@@ -312,6 +381,176 @@ func TestSystemGroupServiceCreateSystemGroupRebuildsRulesFromAcceptedRelationshi
 	tagValues := systemGroupRuleValues(model.GroupingRules, group.GroupAttributeJobTag)
 	if len(tagValues) != 1 || tagValues[0] != "a4_reviewer" {
 		t.Fatalf("job_tag values = %#v, want [a4_reviewer]", tagValues)
+	}
+}
+
+func TestSystemGroupServiceUpdateSystemGroupWritesRelationshipDiff(t *testing.T) {
+	repository := &fakeSystemGroupRepository{
+		currentGroup:      existingServiceSystemGroup(),
+		currentProjection: existingServiceProjection(t),
+	}
+	permissionClient := &fakeSystemGroupPermissionClient{repo: repository}
+	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
+		WithSystemGroupClock(fixedSystemGroupNow),
+	)
+
+	model, permissionErrors, err := service.UpdateSystemGroup(context.Background(), validServiceSystemGroupUpdateInput())
+	if err != nil {
+		t.Fatalf("UpdateSystemGroup error = %v, want nil", err)
+	}
+	if len(permissionErrors) != 0 {
+		t.Fatalf("permission errors = %#v, want empty", permissionErrors)
+	}
+	if repository.getCalls != 1 || repository.updateCalls != 1 {
+		t.Fatalf("repository get/update calls = %d/%d, want 1/1", repository.getCalls, repository.updateCalls)
+	}
+	if permissionClient.calls != 1 {
+		t.Fatalf("permission calls = %d, want 1", permissionClient.calls)
+	}
+	if !permissionClient.calledBeforeRepository {
+		t.Fatal("permission client was not called before repository update")
+	}
+	if len(permissionClient.parameter.Tasks) == 0 {
+		t.Fatal("permission tasks empty, want relationship diff")
+	}
+	hasCreate := false
+	hasDelete := false
+	for _, task := range permissionClient.parameter.Tasks {
+		hasCreate = hasCreate || task.Operator == permission.RelationshipOperationCreate
+		hasDelete = hasDelete || task.Operator == permission.RelationshipOperationDelete
+	}
+	if !hasCreate || !hasDelete {
+		t.Fatalf("tasks = %+v, want both create and delete operations", permissionClient.parameter.Tasks)
+	}
+	if model.Name != "Updated Admins" || !model.CreatedAt.Equal(existingServiceSystemGroup().CreatedAt) || !model.UpdatedAt.Equal(fixedSystemGroupNow()) {
+		t.Fatalf("model = %+v, want requested name, preserved created_at, fixed updated_at", model)
+	}
+}
+
+func TestSystemGroupServiceUpdateSystemGroupNoRelationshipDiffSkipsPermissionWrite(t *testing.T) {
+	current := existingServiceSystemGroup()
+	projection := existingServiceProjection(t)
+	repository := &fakeSystemGroupRepository{currentGroup: current, currentProjection: projection}
+	permissionClient := &fakeSystemGroupPermissionClient{}
+	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
+		WithSystemGroupClock(fixedSystemGroupNow),
+	)
+
+	input := group.SystemGroupUpdateInput{
+		SystemID:      "system-a",
+		GroupID:       "group-1",
+		Name:          "Renamed Admins",
+		GroupingRules: current.GroupingRules,
+	}
+	model, permissionErrors, err := service.UpdateSystemGroup(context.Background(), input)
+	if err != nil {
+		t.Fatalf("UpdateSystemGroup error = %v, want nil", err)
+	}
+	if len(permissionErrors) != 0 {
+		t.Fatalf("permission errors = %#v, want empty", permissionErrors)
+	}
+	if permissionClient.calls != 0 {
+		t.Fatalf("permission calls = %d, want 0", permissionClient.calls)
+	}
+	if repository.updateCalls != 1 || model.Name != "Renamed Admins" {
+		t.Fatalf("repository update calls/model = %d/%+v, want rename persisted", repository.updateCalls, model)
+	}
+}
+
+func TestSystemGroupServiceUpdateSystemGroupNotFoundSkipsPermissionWrite(t *testing.T) {
+	repository := &fakeSystemGroupRepository{err: group.ErrNotFound}
+	permissionClient := &fakeSystemGroupPermissionClient{}
+	service := NewSystemGroupService(repository, WithSystemGroupPermissionClient(permissionClient))
+
+	_, _, err := service.UpdateSystemGroup(context.Background(), validServiceSystemGroupUpdateInput())
+	if !errors.Is(err, group.ErrNotFound) {
+		t.Fatalf("UpdateSystemGroup error = %v, want ErrNotFound", err)
+	}
+	if permissionClient.calls != 0 || repository.updateCalls != 0 {
+		t.Fatalf("permission/update calls = %d/%d, want 0/0", permissionClient.calls, repository.updateCalls)
+	}
+}
+
+func TestSystemGroupServiceUpdateSystemGroupPermissionFailureSkipsRepositoryUpdate(t *testing.T) {
+	repository := &fakeSystemGroupRepository{
+		currentGroup:      existingServiceSystemGroup(),
+		currentProjection: existingServiceProjection(t),
+	}
+	permissionClient := &fakeSystemGroupPermissionClient{err: errors.New("permission unavailable")}
+	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
+		WithSystemGroupClock(fixedSystemGroupNow),
+	)
+
+	_, _, err := service.UpdateSystemGroup(context.Background(), validServiceSystemGroupUpdateInput())
+	if !errors.Is(err, ErrSystemGroupPermissionWriteFailed) {
+		t.Fatalf("UpdateSystemGroup error = %v, want ErrSystemGroupPermissionWriteFailed", err)
+	}
+	if repository.updateCalls != 0 {
+		t.Fatalf("repository update calls = %d, want 0", repository.updateCalls)
+	}
+}
+
+func TestSystemGroupServiceUpdateSystemGroupPartialFailureMergesFinalProjection(t *testing.T) {
+	repository := &fakeSystemGroupRepository{
+		currentGroup:      existingServiceSystemGroup(),
+		currentProjection: existingServiceProjection(t),
+	}
+	permissionClient := &fakeSystemGroupPermissionClient{
+		resultFunc: func(parameter permission.WriteRelationshipsParameter) permission.WriteRelationshipsResult {
+			var failedCreate permission.RelationshipTask
+			var failedDelete permission.RelationshipTask
+			for _, task := range parameter.Tasks {
+				if task.Operator == permission.RelationshipOperationCreate && failedCreate.Relationship.Relation == "" {
+					failedCreate = task
+				}
+				if task.Operator == permission.RelationshipOperationDelete && failedDelete.Relationship.Relation == "" {
+					failedDelete = task
+				}
+			}
+			return permission.WriteRelationshipsResult{
+				FailedTasks: []permission.FailedRelationshipTask{
+					{RelationshipTask: failedCreate, Error: "create rejected"},
+					{RelationshipTask: failedDelete, Error: "delete rejected"},
+				},
+			}
+		},
+	}
+	var logBuffer bytes.Buffer
+	service := NewSystemGroupService(repository,
+		WithSystemGroupPermissionClient(permissionClient),
+		WithSystemGroupClock(fixedSystemGroupNow),
+		WithSystemGroupLogger(slog.New(slog.NewTextHandler(&logBuffer, nil))),
+	)
+
+	model, permissionErrors, err := service.UpdateSystemGroup(context.Background(), validServiceSystemGroupUpdateInput())
+	if err != nil {
+		t.Fatalf("UpdateSystemGroup error = %v, want nil", err)
+	}
+	if len(permissionErrors) != 2 {
+		t.Fatalf("permission errors = %#v, want two errors", permissionErrors)
+	}
+	if repository.updateCalls != 1 {
+		t.Fatalf("repository update calls = %d, want 1", repository.updateCalls)
+	}
+	if len(repository.updateProjection.Relationships) == 0 {
+		t.Fatal("saved relationships empty, want failed delete relationship retained")
+	}
+	orgValues := systemGroupRuleValues(model.GroupingRules, group.GroupAttributeOrganization)
+	if len(orgValues) == 0 || orgValues[0] != "ORG-100" {
+		t.Fatalf("organization values = %#v, want retained current organization", orgValues)
+	}
+	if model.Name != "Updated Admins" {
+		t.Fatalf("name = %q, want requested name preserved", model.Name)
+	}
+	output := logBuffer.String()
+	if !strings.Contains(output, "permission API relationship update partially failed") {
+		t.Fatalf("log output = %q, want update partial failure warning", output)
+	}
+	if !strings.Contains(output, "failed_task_count=2") {
+		t.Fatalf("log output = %q, want failed_task_count=2", output)
 	}
 }
 

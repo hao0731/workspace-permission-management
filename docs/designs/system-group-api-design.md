@@ -4,7 +4,7 @@
 
 `group-service` currently owns workspace-scoped groups used as permission subjects. System resource APIs now expose a system-scoped boundary through `/api/v1/systems/:system_id/...`, and system-owned groups need the same boundary so a system can define reusable group membership projections.
 
-This design adds system group creation and list APIs to `group-service`. A system group stores its public definition in the `system_groups` collection and stores the permission API relationship projection in `system_group_relationships`.
+This design adds system group creation, update, and list APIs to `group-service`. A system group stores its public definition in the `system_groups` collection and stores the permission API relationship projection in `system_group_relationships`.
 
 Related designs:
 
@@ -35,6 +35,7 @@ Policy alignment:
 ## Goals
 
 - Expose `POST /api/v1/systems/:system_id/groups`.
+- Expose `PUT /api/v1/systems/:system_id/groups/:group_id`.
 - Expose `GET /api/v1/systems/:system_id/groups?limit=<LIMIT>&next_token=<TOKEN>`.
 - Store system group definitions in MongoDB collection `system_groups`.
 - Store system group relationship projections in MongoDB collection `system_group_relationships`.
@@ -45,6 +46,11 @@ Policy alignment:
 - Persist only relationships accepted by the permission API when the permission API returns per-task failures.
 - Return `206 Partial Content` with the saved adjusted group and permission API error strings when some relationship write tasks fail.
 - Write `system_groups` and `system_group_relationships` atomically in one MongoDB transaction during create.
+- Read the current system group relationship projection before update and return `404 Not Found` when the saved projection does not exist.
+- Convert update payloads into desired relationship projections and diff them against the current MongoDB projection by checksum.
+- Send one mixed permission API relationship write request containing both create and delete tasks during update.
+- Persist only the relationship changes accepted by the permission API when update write tasks partially fail.
+- Update `system_groups` and `system_group_relationships` atomically in one MongoDB transaction during update.
 - Support cursor pagination for system group list with default `limit = 20` and maximum `limit = 50`.
 - Return empty pages for systems with no groups.
 
@@ -52,7 +58,7 @@ Policy alignment:
 
 - Do not implement `operator: "not_eq"` behavior in this phase. Requests containing `not_eq` are rejected with `400 validation_failed`.
 - Do not validate whether `system_id` references an existing system registry. No registry exists in this repository yet.
-- Do not implement system group read-by-ID, update, delete, restore, hard delete, history, or relationship recalculation APIs.
+- Do not implement system group read-by-ID, delete, restore, hard delete, history, or relationship recalculation APIs.
 - Do not publish group-created or membership-changed events.
 - Do not add frontend changes.
 
@@ -209,6 +215,148 @@ Create field contract:
 - Timestamps are returned as RFC3339 strings through Go JSON encoding for `time.Time`.
 - The endpoint does not check whether the system exists in another registry.
 
+### Update System Group
+
+Endpoint:
+
+```http
+PUT /api/v1/systems/:system_id/groups/:group_id
+Content-Type: application/json
+```
+
+Path parameters:
+
+- `system_id`: required system identifier.
+- `group_id`: required system group identifier.
+
+Request body:
+
+```go
+type SystemGroupUpdateRequest struct {
+	Name          string                   `json:"name"`
+	GroupingRules []SystemGroupRuleRequest `json:"grouping_rules"`
+}
+
+type SystemGroupRuleRequest struct {
+	AttributeKey string `json:"attribute_key"`
+	Operator     string `json:"operator"`
+	Multi        *bool  `json:"multi"`
+	Value        any    `json:"value"`
+}
+```
+
+Example request:
+
+```json
+{
+  "name": "System Admins - Updated",
+  "grouping_rules": [
+    {
+      "attribute_key": "organization",
+      "operator": "eq",
+      "multi": true,
+      "value": ["ORG-100", "ORG-300"]
+    },
+    {
+      "attribute_key": "job_type",
+      "operator": "eq",
+      "multi": false,
+      "value": "IDL"
+    }
+  ]
+}
+```
+
+Success response:
+
+```http
+HTTP/1.1 200 OK
+```
+
+```json
+{
+  "group": {
+    "id": "0d5c4f7e-7675-4c90-b495-93655c2d3c40",
+    "name": "System Admins - Updated",
+    "grouping_rules": [
+      {
+        "attribute_key": "organization",
+        "operator": "eq",
+        "multi": true,
+        "value": ["ORG-100", "ORG-300"]
+      },
+      {
+        "attribute_key": "job_type",
+        "operator": "eq",
+        "multi": false,
+        "value": "IDL"
+      }
+    ],
+    "created_at": "2026-05-20T10:00:00Z",
+    "updated_at": "2026-05-28T10:00:00Z"
+  }
+}
+```
+
+Partial success response:
+
+```http
+HTTP/1.1 206 Partial Content
+```
+
+```json
+{
+  "group": {
+    "id": "0d5c4f7e-7675-4c90-b495-93655c2d3c40",
+    "name": "System Admins - Updated",
+    "grouping_rules": [
+      {
+        "attribute_key": "organization",
+        "operator": "eq",
+        "multi": true,
+        "value": ["ORG-100"]
+      }
+    ],
+    "created_at": "2026-05-20T10:00:00Z",
+    "updated_at": "2026-05-28T10:00:00Z"
+  },
+  "errors": [
+    "permission relationship delete rejected"
+  ]
+}
+```
+
+Missing saved system group response:
+
+```http
+HTTP/1.1 404 Not Found
+```
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "System group not found",
+    "details": {},
+    "request_id": "request-id"
+  }
+}
+```
+
+Update field contract:
+
+- `system_id` and `group_id` are taken from the path and are not returned in the group object.
+- `name` is required, trimmed before validation and persistence, and returned trimmed.
+- `grouping_rules` is required and must be an array. The update request reuses the existing `SystemGroupRuleRequest` rule DTO.
+- The rule validation and relationship generation contract is identical to create.
+- An empty `grouping_rules` array is allowed and means the desired projection falls back to all-employee HR and A4 relationships.
+- `created_at` is preserved from the existing `system_groups` document.
+- `updated_at` is assigned from one service-generated UTC timestamp and is applied to both the group document and relationship projection document.
+- A fully successful update persists the normalized request group and desired relationship projection.
+- A partial permission API task failure persists the requested `name`, the relationship projection after applying only successful create and delete tasks, and a public `grouping_rules` value rebuilt from that final projection.
+- The response always wraps the saved group in `{ "group": ... }`; partial success additionally includes `errors`.
+- The endpoint does not check whether the system exists in another registry.
+
 ### List System Groups
 
 Endpoint:
@@ -284,7 +432,7 @@ List behavior:
 
 ## Rule Contract
 
-`grouping_rules` supports exactly four rule shapes in this phase:
+Create and update `grouping_rules` support exactly four rule shapes in this phase:
 
 ```ts
 type OrgRule = {
@@ -440,8 +588,8 @@ Checksum contract:
 - Do not include the outer `RelationshipInfo` wrapper.
 - Compute SHA256 over the JSON bytes.
 - Store the checksum as a lowercase hex string.
-- If marshaling fails, the create request fails before starting the MongoDB transaction.
-- Failed permission API tasks are matched back to the original generated projection by recomputing this checksum over the failed relationship payload.
+- If marshaling fails, the create or update request fails before starting the MongoDB transaction.
+- Failed permission API tasks are matched back to the relevant generated projection by recomputing this checksum over the failed relationship payload.
 
 The relationship helper structs use deterministic struct field order. Derived value sorting keeps logically equivalent rule sets stable even when duplicate values appear in different request positions.
 
@@ -469,6 +617,7 @@ Field notes:
 - `name` is the trimmed display name.
 - `grouping_rules` stores the accepted public rule representation.
 - `created_at` and `updated_at` are set to the same service-generated UTC timestamp during creation.
+- Updates preserve `created_at` and replace `name`, `grouping_rules`, and `updated_at`.
 - There is no soft-delete field in this phase because no delete API is part of this design.
 
 Indexes:
@@ -504,6 +653,7 @@ Field notes:
 - `relationship[].relationship` stores the permission API `Relationship` object.
 - `relationship[].checksum` stores the relationship checksum.
 - `created_at` and `updated_at` are set to the same service-generated UTC timestamp during creation.
+- Updates preserve `created_at` and replace `relationship` and `updated_at`.
 
 Indexes:
 
@@ -560,6 +710,54 @@ Partial permission API failures require rebuilding the saved public group from t
 
 The relationship projection remains the accurate permission state when all relationships of a fallback category fail. A rebuilt group with no public rules therefore does not imply that fallback relationships were saved; callers should use the `206` errors to detect partial permission state.
 
+### Update
+
+1. Handler extracts `system_id` and `group_id`, decodes the request body, and maps it to a domain update input.
+2. Service normalizes and validates `system_id`, `group_id`, `name`, and `grouping_rules`.
+3. Service reads the current `system_groups` document and current `system_group_relationships` projection by `system_id` and `group_id`.
+4. If the saved relationship projection does not exist, service returns a stable not-found error and does not call the permission API.
+5. Service creates one UTC `now` timestamp for the update.
+6. Service builds the desired system group model using the existing group ID, existing `created_at`, requested `name`, requested `grouping_rules`, and `updated_at = now`.
+7. Service builds the deterministic desired relationship projection from the requested `grouping_rules` using the existing `group_id`, existing projection `created_at`, and `updated_at = now`.
+8. Service computes the relationship diff by checksum:
+   - desired checksum absent from the current projection becomes a `create` task,
+   - current checksum absent from the desired projection becomes a `delete` task,
+   - checksum present in both projections is unchanged and does not produce a permission API task.
+9. Service orders create tasks by desired projection order and delete tasks by current projection order.
+10. If the diff is empty, service skips the permission API call and proceeds to MongoDB persistence with the normalized request group and desired projection.
+11. If the diff is non-empty, service sends all create and delete tasks in one `WriteRelationships` request.
+12. If the permission API returns no failed tasks, service keeps the normalized request group and desired projection.
+13. If the permission API returns failed tasks, service logs a warning with `system_id`, `group_id`, failed count, and error strings.
+14. If the permission API returns failed tasks, service computes the final projection with the existing projection `created_at`, `updated_at = now`, and only successful relationship tasks:
+    - unchanged relationships remain,
+    - successful create tasks are added,
+    - failed create tasks are not added,
+    - successful delete tasks are removed,
+    - failed delete tasks remain.
+15. If the permission API returns failed tasks, service rebuilds the saved public `grouping_rules` from the final projection while preserving the requested `name`.
+16. Repository starts a MongoDB session and executes the update callback through `session.WithTransaction`.
+17. Repository updates the `system_groups` document by `system_id` and `group_id`.
+18. Repository replaces the matching `system_group_relationships.relationship` projection by `system_id` and `group_id`.
+19. MongoDB commits the transaction.
+20. Service returns the saved group plus permission API error strings.
+21. Handler renders `200 OK` with `{ "group": ... }` when no permission task failed.
+22. Handler renders `206 Partial Content` with `{ "group": ..., "errors": [...] }` when at least one permission task failed.
+
+Update failure behavior:
+
+- Validation errors return `400 Bad Request` with `validation_failed`.
+- Missing current system group or relationship projection returns `404 Not Found` with `not_found`.
+- If relationship generation, checksum computation, or diff construction fails, no permission API request is sent and no MongoDB transaction is started.
+- If the permission API request fails as a whole, no MongoDB transaction is started and the handler returns an upstream dependency error.
+- If the MongoDB transaction fails, the permission API may already have accepted some relationship writes. The handler returns the repository or infrastructure failure and logs with `system_id` and `group_id`; reconciliation is outside this phase.
+- Unexpected repository, transaction, or infrastructure failures return `500 Internal Server Error`.
+
+Update concurrency:
+
+- This phase does not add ETags, version fields, or optimistic concurrency control.
+- Concurrent updates are last-write-wins at the MongoDB document level.
+- Because permission API writes happen before MongoDB persistence, concurrent updates can temporarily diverge across systems if one request succeeds in the permission API and later fails in MongoDB. This matches the create workflow trade-off and should be revisited with a reconciliation design if stronger guarantees become required.
+
 ### List
 
 1. Handler extracts `system_id`, parses `limit`, and parses `next_token`.
@@ -595,13 +793,15 @@ Known errors use the shared backend error response shape:
 Status mapping:
 
 - `400 Bad Request`: malformed JSON, invalid path identity, invalid query parameter, invalid `next_token`, unsupported operator, invalid rule shape, empty `name`, empty string values, invalid `job_type` value, or more than one `job_type` rule.
-- `206 Partial Content`: system group was saved after one or more permission relationship write tasks failed; response includes `errors`.
+- `404 Not Found`: update target does not have a saved system group relationship projection for the requested `system_id` and `group_id`.
+- `206 Partial Content`: system group create or update was saved after one or more permission relationship write tasks failed; response includes `errors`.
 - `502 Bad Gateway`: permission API request-level failure before local persistence.
 - `500 Internal Server Error`: unexpected repository, transaction, checksum, or infrastructure failure.
 
 Recommended error codes:
 
 - `validation_failed`
+- `not_found`
 - `permission_write_failed`
 - `internal_error`
 
@@ -631,10 +831,10 @@ internal/group-service/repositories/
 
 Responsibilities:
 
-- `internal/domain/group`: system group model, create input, list query, cursor, rule constants, normalization, validation, and stable domain errors.
-- `internal/group-service/transport`: request/response DTOs, JSON rule decoding, pagination token encode/decode, and DTO/domain mapping.
-- `internal/group-service/services`: use cases, ID generation, clock usage, relationship projection building, checksum computation, and repository orchestration.
-- `internal/group-service/repositories`: MongoDB documents, indexes, list query, cursor predicate, transactions, and document/domain mapping.
+- `internal/domain/group`: system group model, create input, update input, list query, cursor, rule constants, normalization, validation, and stable domain errors.
+- `internal/group-service/transport`: request/response DTOs, JSON rule decoding, pagination token encode/decode, and DTO/domain mapping. `SystemGroupUpdateRequest` reuses the existing `SystemGroupRuleRequest`.
+- `internal/group-service/services`: use cases, ID generation, clock usage, relationship projection building, checksum computation, diff construction, permission write orchestration, partial-result projection rebuilds, and repository orchestration.
+- `internal/group-service/repositories`: MongoDB documents, indexes, current group/projection reads, create/update transactions, list query, cursor predicate, and document/domain mapping.
 
 The existing `cmd/group-service/main.go` remains the composition root. It should construct the system group service, register the new routes, and ensure the new repository indexes during startup.
 
@@ -644,6 +844,9 @@ The implementation should add `examples/api/system-groups.http` for this endpoin
 
 - Successful system group creation with organization, job type, job level, and job tag rules.
 - Successful creation with empty `grouping_rules`.
+- Successful system group update with changed `name` and changed `grouping_rules`.
+- System group update that may return `206 Partial Content` when permission relationship create or delete tasks partially fail.
+- System group update returning `404 Not Found` when no saved system group relationship projection exists for `system_id` and `group_id`.
 - Validation failure for `operator: "not_eq"`.
 - Validation failure for more than one `job_type` rule.
 - Validation failure for invalid `limit`.
@@ -656,6 +859,7 @@ The implementation should add `examples/api/system-groups.http` for this endpoin
 Domain tests:
 
 - `system_id` validation follows the system-scoped API convention.
+- `group_id` validation is required for update inputs.
 - Trimmed `name` is required.
 - `grouping_rules` is required and accepts an empty array.
 - `not_eq` is rejected in this phase.
@@ -670,8 +874,11 @@ Domain tests:
 Transport tests:
 
 - Create request decodes each allowed rule shape.
+- Update request decodes each allowed rule shape and reuses `SystemGroupRuleRequest`.
 - Invalid `multi` and value shape return validation errors.
 - Create response renders `{ "group": ... }`.
+- Update response renders `{ "group": ... }`.
+- Update partial response renders `{ "group": ..., "errors": [...] }`.
 - List query defaults `limit` to `20`.
 - List query rejects `limit > 50`.
 - System group next token encodes and decodes `created_at` and `id`.
@@ -699,12 +906,32 @@ Service tests:
 - Validation failures do not call the repository.
 - Repository failures are wrapped with context.
 - List validates input before calling the repository.
+- Successful update reads the current group and relationship projection before permission writes.
+- Update returns not found and does not call the permission API when the current relationship projection is missing.
+- Update builds create tasks for desired relationship checksums absent from MongoDB.
+- Update builds delete tasks for MongoDB relationship checksums absent from the desired payload.
+- Update keeps unchanged checksums out of the permission API task list.
+- Update sends create and delete tasks in one `WriteRelationships` request.
+- Update skips the permission API when the relationship diff is empty and still updates `name`, `grouping_rules`, and `updated_at`.
+- Update permission API request-level failure returns a permission write failure and does not call the repository update method.
+- Update failed create tasks are excluded from the saved relationship projection.
+- Update failed delete tasks remain in the saved relationship projection.
+- Update successful create tasks are added to the saved relationship projection.
+- Update successful delete tasks are removed from the saved relationship projection.
+- Update partial failures rebuild the saved group from the final relationship projection while preserving the requested `name`.
+- Update partial failures produce warning logs with `system_id`, `group_id`, failed count, and errors.
+- Update preserves `created_at` and replaces `updated_at` with the service clock value.
 
 Repository tests:
 
 - `EnsureIndexes` creates the system group list index and relationship unique index.
 - Successful create writes `system_groups` and `system_group_relationships` in one transaction.
 - Insert failure for either collection rolls back both writes.
+- Current system group reads return the group document and relationship projection for `system_id` and `group_id`.
+- Current system group reads return not found when the relationship projection is missing.
+- Successful update modifies `system_groups` and `system_group_relationships` in one transaction.
+- Update preserves existing `created_at` values and replaces `updated_at`.
+- Update failure for either collection rolls back both writes.
 - List filters by `system_id`.
 - List sorts by `created_at DESC, _id DESC`.
 - List applies cursor predicates correctly.
@@ -715,6 +942,10 @@ Handler tests:
 - Successful create returns `201` and the documented response body.
 - Partial permission relationship write failure returns `206` with `group` and `errors`.
 - Permission API request-level failure returns `502`.
+- Successful update returns `200` and the documented response body.
+- Partial update permission relationship write failure returns `206` with `group` and `errors`.
+- Missing update target returns `404`.
+- Update permission API request-level failure returns `502`.
 - Successful list returns `200` with `groups` and `page_info`.
 - Empty list returns `200` with an empty group array and empty `next_token`.
 - Invalid create requests return `400`.
@@ -736,7 +967,7 @@ go test ./...
 
 2. Store group definitions and relationship projections separately.
    - Rationale: Public group data and permission relationship data change for different reasons.
-   - Trade-off: Create requires a multi-collection transaction.
+   - Trade-off: Create and update require multi-collection transactions.
 
 3. Generate relationships in the service layer.
    - Rationale: Relationship construction is use-case behavior and should be testable without MongoDB.
@@ -749,3 +980,11 @@ go test ./...
 5. Sort deduped values before projection generation.
    - Rationale: Stable relationship order makes persisted projections, checksums, and tests deterministic.
    - Trade-off: Relationship projection order may differ from request value order, while the public `grouping_rules` field still preserves the request representation.
+
+6. Diff update relationships by checksum and send one mixed permission write request.
+   - Rationale: The checksum is already the persisted identity for generated relationships, and the permission client already supports both create and delete relationship operations in one request.
+   - Trade-off: The service must merge successful and failed create/delete tasks into a final projection before MongoDB persistence.
+
+7. Skip the permission API when an update has no relationship diff.
+   - Rationale: Name-only updates and logically equivalent rule updates do not need external side effects.
+   - Trade-off: The service needs an explicit no-op branch before permission write orchestration.

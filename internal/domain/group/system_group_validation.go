@@ -6,28 +6,14 @@ import (
 )
 
 func (input SystemGroupCreateInput) Validate() error {
-	if err := validateSystemID(input.SystemID); err != nil {
+	return validateSystemGroupMutation(input.SystemID, input.Name, input.GroupingRules)
+}
+
+func (input SystemGroupUpdateInput) Validate() error {
+	if err := validateSystemGroupID(input.GroupID); err != nil {
 		return err
 	}
-	if strings.TrimSpace(input.Name) == "" {
-		return invalidInput("name is required")
-	}
-	if input.GroupingRules == nil {
-		return invalidInput("grouping_rules is required")
-	}
-	jobTypeCount := 0
-	for _, rule := range input.GroupingRules {
-		if rule.AttributeKey == GroupAttributeJobType {
-			jobTypeCount++
-			if jobTypeCount > 1 {
-				return invalidInput("only one job_type rule is allowed")
-			}
-		}
-		if err := rule.Validate(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateSystemGroupMutation(input.SystemID, input.Name, input.GroupingRules)
 }
 
 func (query SystemGroupListQuery) Validate() error {
@@ -43,6 +29,31 @@ func (query SystemGroupListQuery) Validate() error {
 		}
 		if strings.TrimSpace(query.Cursor.ID) == "" {
 			return invalidInput("cursor id is required")
+		}
+	}
+	return nil
+}
+
+func validateSystemGroupMutation(systemID string, name string, rules []SystemGroupRule) error {
+	if err := validateSystemID(systemID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" {
+		return invalidInput("name is required")
+	}
+	if rules == nil {
+		return invalidInput("grouping_rules is required")
+	}
+	jobTypeCount := 0
+	for _, rule := range rules {
+		if rule.AttributeKey == GroupAttributeJobType {
+			jobTypeCount++
+			if jobTypeCount > 1 {
+				return invalidInput("only one job_type rule is allowed")
+			}
+		}
+		if err := rule.Validate(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -122,6 +133,17 @@ func validateSystemID(systemID string) error {
 	}
 	if strings.ContainsAny(trimmed, " \t\n\r.") {
 		return invalidInput("system id must be a single subject token")
+	}
+	return nil
+}
+
+func validateSystemGroupID(groupID string) error {
+	trimmed := strings.TrimSpace(groupID)
+	if trimmed == "" {
+		return invalidInput("group id is required")
+	}
+	if strings.ContainsAny(trimmed, " \t\n\r") {
+		return invalidInput("group id must be a single token")
 	}
 	return nil
 }
