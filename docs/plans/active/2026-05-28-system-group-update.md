@@ -865,12 +865,12 @@ func validServiceSystemGroupUpdateInput() group.SystemGroupUpdateInput {
 	return group.SystemGroupUpdateInput{
 		SystemID: "system-a",
 		GroupID:  "group-1",
-		Name:     "Updated Admins",
-		GroupingRules: []group.SystemGroupRule{
-			{AttributeKey: group.GroupAttributeOrganization, Operator: group.OperatorEq, Multi: true, Value: []string{"ORG-100", "ORG-300"}},
-			{AttributeKey: group.GroupAttributeJobType, Operator: group.OperatorEq, Multi: false, Value: group.SystemGroupJobTypeIDL},
-		},
-	}
+	Name:     "Updated Admins",
+	GroupingRules: []group.SystemGroupRule{
+		{AttributeKey: group.GroupAttributeOrganization, Operator: group.OperatorEq, Multi: true, Value: []string{"ORG-300"}},
+		{AttributeKey: group.GroupAttributeJobType, Operator: group.OperatorEq, Multi: false, Value: group.SystemGroupJobTypeIDL},
+	},
+}
 }
 ```
 
