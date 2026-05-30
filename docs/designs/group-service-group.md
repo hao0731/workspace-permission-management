@@ -1,3 +1,33 @@
+---
+doc_id: design.group-service-group
+doc_type: design
+title: Group API design
+status: implemented
+
+tags:
+  - group
+  - api
+
+code_paths:
+  - internal/group-service/**
+  - internal/domain/group/**
+  - cmd/group-service/**
+
+related:
+  designs:
+    - design.group-service
+    - design.group-service-individual-members
+    - design.group-service-group-expiry-command
+    - design.group-service-individual-member-expiry-command
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing workspace group create, read, soft-delete, dynamic
+  grouping rules, or group repository/service boundaries.
+---
+
 # Group API Design
 
 ## Background

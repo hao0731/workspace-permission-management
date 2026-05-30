@@ -1,3 +1,38 @@
+---
+doc_id: design.group-service
+doc_type: design
+title: Group service design
+status: implemented
+
+tags:
+  - group
+  - membership
+  - permission
+
+code_paths:
+  - cmd/group-service/**
+  - internal/group-service/**
+  - internal/domain/group/**
+  - internal/shared/repositories/expiry/**
+
+related:
+  designs:
+    - design.group-service-group
+    - design.group-service-individual-members
+    - design.group-service-group-expiry-command
+    - design.group-service-individual-member-expiry-command
+    - design.group-expiry-scheduler
+    - design.system-group-api
+    - design.function-resource-permissions
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this as the entry design for group-service membership, grouping rules,
+  expiry workflows, system groups, and permission relationship projection.
+---
+
 # Group Service Design
 
 ## Background

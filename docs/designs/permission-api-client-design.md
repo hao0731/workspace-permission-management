@@ -1,3 +1,32 @@
+---
+doc_id: design.permission-api-client
+doc_type: design
+title: Permission API client design
+status: implemented
+
+tags:
+  - permission
+  - api-client
+  - interactions
+
+code_paths:
+  - internal/shared/interactions/permission/**
+  - internal/mock-permission-api/**
+  - cmd/mock-permission-api/**
+
+related:
+  designs:
+    - design.permission-client
+    - design.function-service-system-resource-api
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing the shared permission HTTP API client, relationship
+  helper contracts, or mock permission API integration behavior.
+---
+
 # Permission API Client Design
 
 ## Background

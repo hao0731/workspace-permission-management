@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Document Index Creator"
+  short_description: "Index design docs from frontmatter"
+  default_prompt: "Use $design-document-index-creator to update docs/designs/index.yaml after editing a design document."

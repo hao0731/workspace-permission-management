@@ -1,3 +1,35 @@
+---
+doc_id: design.group-service-group-expiry-command
+doc_type: design
+title: Group expiry command design
+status: implemented
+
+tags:
+  - group
+  - expiry
+  - command
+
+code_paths:
+  - internal/group-service/**
+  - internal/domain/group/**
+  - internal/shared/repositories/expiry/**
+  - cmd/group-service/**
+
+related:
+  designs:
+    - design.group-service
+    - design.group-service-group
+    - design.group-expiry-scheduler
+    - design.group-service-individual-member-expiry-command
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing grouping-rule expiry task persistence, expiry command
+  CloudEvents, or idempotent group expiry handling.
+---
+
 # Group Expiry Command Design
 
 ## Background

@@ -1,3 +1,35 @@
+---
+doc_id: design.function-service
+doc_type: design
+title: Function service design
+status: implemented
+
+tags:
+  - function
+  - resource-projection
+
+code_paths:
+  - cmd/function-service/**
+  - internal/function-service/**
+  - internal/domain/resource/**
+  - internal/shared/eventbus/**
+
+related:
+  designs:
+    - design.function-resource-permissions
+    - design.function-service-system-resource-api
+    - design.resource-command-event-contracts
+    - design.shared-pagination-helper-refactor
+    - design.resource-input-validation-refactor
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this as the entry design for function-service resource projection,
+  workspace/function resource APIs, deletion behavior, and related extensions.
+---
+
 # Function Service Design
 
 ## Background

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Document Searcher"
+  short_description: "Find relevant design docs precisely"
+  default_prompt: "Use $design-document-searcher to find the relevant design documents for this change."

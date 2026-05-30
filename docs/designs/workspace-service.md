@@ -1,3 +1,39 @@
+---
+doc_id: design.workspace-service
+doc_type: design
+title: Workspace service design
+status: implemented
+
+tags:
+  - workspace
+  - service
+  - resource-command
+
+code_paths:
+  - cmd/workspace-service/**
+  - internal/workspace-service/**
+  - internal/domain/workspace/**
+  - internal/domain/resource/**
+  - internal/shared/interactions/hr/**
+  - internal/shared/eventbus/**
+
+related:
+  designs:
+    - design.workspace-service-api
+    - design.workspace-service-command
+    - design.resource-command-event-contracts
+    - design.mock-function
+    - design.mock-hr
+    - design.function-service
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this as the entry design for workspace-service APIs, workspace
+  persistence, HR lookup, favorite state, and resource command publishing.
+---
+
 # Workspace Service Design
 
 ## Background

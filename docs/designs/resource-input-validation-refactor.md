@@ -1,3 +1,34 @@
+---
+doc_id: design.resource-input-validation-refactor
+doc_type: design
+title: Resource input validation refactor design
+status: implemented
+
+tags:
+  - resource
+  - validation
+  - refactor
+
+code_paths:
+  - internal/domain/resource/**
+  - internal/function-service/**
+  - internal/workspace-service/**
+  - internal/mock-function/**
+
+related:
+  designs:
+    - design.resource-command-event-contracts
+    - design.function-service
+    - design.shared-pagination-helper-refactor
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing resource domain validation, transport-to-domain
+  parsing, or shared resource input invariants.
+---
+
 # Resource Input Validation Refactor Design
 
 ## Status

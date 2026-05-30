@@ -1,3 +1,31 @@
+---
+doc_id: design.permission-client
+doc_type: design
+title: Permission registration consumer interface design
+status: implemented
+
+tags:
+  - permission
+  - consumer-interface
+  - registration
+
+code_paths:
+  - internal/function-service/services/**
+  - internal/shared/interactions/permission/**
+
+related:
+  designs:
+    - design.permission-api-client
+    - design.function-service-system-resource-api
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing consumer-side permission registration interfaces or
+  function-service integration with shared permission interactions.
+---
+
 # Permission Registration Consumer Interface Design
 
 ## Background

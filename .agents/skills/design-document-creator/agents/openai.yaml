@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Document Creator"
+  short_description: "Create structured engineering design docs"
+  default_prompt: "Use $design-document-creator to draft a design document for this feature."

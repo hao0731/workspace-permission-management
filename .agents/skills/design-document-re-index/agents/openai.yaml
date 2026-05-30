@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Document Re-Index"
+  short_description: "Check and refresh design-doc indexes"
+  default_prompt: "Use $design-document-re-index to verify docs/designs/index.yaml matches design document frontmatter and rebuild it if stale."
