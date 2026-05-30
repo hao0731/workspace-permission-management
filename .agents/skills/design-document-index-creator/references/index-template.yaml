@@ -1,0 +1,12 @@
+version: 1
+documents:
+  - doc_id: <Copy from design document>
+    path: <Design document path, such as: docs/designs/todo.md>
+    title: <Copy from design document>
+    status: <Copy from design document>
+    code_paths:
+      - <Copy from design document>
+    tags:
+      - <Copy from design document>
+    summary: >
+      <design document summary content>

@@ -13,6 +13,30 @@
       "skillPath": "skills/checking-design-doc-drift/SKILL.md",
       "computedHash": "cc68ed47293faef17cf0ffd9ac76bd8a165a4204844788e1c10b3553afd46ed3"
     },
+    "design-document-creator": {
+      "source": "hao0731/hao-loom",
+      "sourceType": "github",
+      "skillPath": "skills/design-document-creator/SKILL.md",
+      "computedHash": "f6e7b5c55d8877efddb86856145b6dae889c2f037c919a7b82232634e4881ce8"
+    },
+    "design-document-index-creator": {
+      "source": "hao0731/hao-loom",
+      "sourceType": "github",
+      "skillPath": "skills/design-document-index-creator/SKILL.md",
+      "computedHash": "04fb23ed9c93b76be2138fe216727e666df662caadfb6666f4756a107c61e157"
+    },
+    "design-document-re-index": {
+      "source": "hao0731/hao-loom",
+      "sourceType": "github",
+      "skillPath": "skills/design-document-re-index/SKILL.md",
+      "computedHash": "21c767a1f062d05563c7ca047e261b096fb127da1968d00f1f7fa9e739972404"
+    },
+    "design-document-searcher": {
+      "source": "hao0731/hao-loom",
+      "sourceType": "github",
+      "skillPath": "skills/design-document-searcher/SKILL.md",
+      "computedHash": "714f642de665619eee5dfb889da2b7140f90606b6babcbc41f2080fac778c946"
+    },
     "dispatching-parallel-agents": {
       "source": "obra/superpowers",
       "sourceType": "github",
