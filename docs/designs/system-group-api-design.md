@@ -1,3 +1,34 @@
+---
+doc_id: design.system-group-api
+doc_type: design
+title: System group API design
+status: implemented
+
+tags:
+  - group
+  - system
+  - permission
+
+code_paths:
+  - internal/group-service/**
+  - internal/domain/group/**
+  - internal/shared/interactions/permission/**
+  - cmd/group-service/**
+
+related:
+  designs:
+    - design.group-service
+    - design.function-service-system-resource-api
+    - design.permission-api-client
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing system-scoped group APIs, system group persistence,
+  or permission relationship projection behavior.
+---
+
 # System Group API Design
 
 ## Background

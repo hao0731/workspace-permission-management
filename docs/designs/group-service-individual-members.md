@@ -1,3 +1,33 @@
+---
+doc_id: design.group-service-individual-members
+doc_type: design
+title: Group individual members API design
+status: implemented
+
+tags:
+  - group
+  - individual-members
+  - api
+
+code_paths:
+  - internal/group-service/**
+  - internal/domain/group/**
+  - cmd/group-service/**
+
+related:
+  designs:
+    - design.group-service
+    - design.group-service-group
+    - design.group-service-individual-member-expiry-command
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing explicit individual member APIs, membership
+  persistence, pagination, or individual member mutation behavior.
+---
+
 # Group Individual Members API Design
 
 ## Background

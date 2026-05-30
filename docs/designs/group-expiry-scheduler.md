@@ -1,3 +1,33 @@
+---
+doc_id: design.group-expiry-scheduler
+doc_type: design
+title: Group expiry scheduler design
+status: implemented
+
+tags:
+  - group
+  - expiry
+  - scheduler
+
+code_paths:
+  - cmd/group-expiry-scheduler/**
+  - internal/group-expiry-scheduler/**
+  - internal/shared/repositories/expiry/**
+
+related:
+  designs:
+    - design.group-service
+    - design.group-service-group-expiry-command
+    - design.group-service-individual-member-expiry-command
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing the group-expiry-scheduler service, expiry task
+  scanning, or scheduled publication of group expiry commands.
+---
+
 # Group Expiry Scheduler Design
 
 ## Background

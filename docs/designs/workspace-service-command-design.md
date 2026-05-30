@@ -1,3 +1,35 @@
+---
+doc_id: design.workspace-service-command
+doc_type: design
+title: Workspace service command design
+status: implemented
+
+tags:
+  - workspace
+  - resource-command
+  - cloudevents
+
+code_paths:
+  - internal/workspace-service/**
+  - internal/domain/resource/**
+  - internal/shared/eventbus/**
+  - cmd/workspace-service/**
+
+related:
+  designs:
+    - design.workspace-service
+    - design.workspace-service-api
+    - design.resource-command-event-contracts
+    - design.mock-function
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing workspace resource-create command publishing,
+  application mapping configuration, or command CloudEvent contracts.
+---
+
 # Workspace Service Command Design
 
 ## Background

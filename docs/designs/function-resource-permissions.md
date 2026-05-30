@@ -1,3 +1,30 @@
+---
+doc_id: design.function-resource-permissions
+doc_type: design
+title: Function resource permissions design
+status: implemented
+
+tags:
+  - function
+  - permission
+  - api
+
+code_paths:
+  - internal/function-service/**
+  - cmd/function-service/**
+
+related:
+  designs:
+    - design.function-service
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing workspace/function permission configuration APIs,
+  rule persistence, or function_resource_permissions service behavior.
+---
+
 # Function Resource Permissions Design
 
 ## Background

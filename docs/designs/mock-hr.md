@@ -1,3 +1,32 @@
+---
+doc_id: design.mock-hr
+doc_type: design
+title: Mock HR design
+status: implemented
+
+tags:
+  - mock
+  - hr
+
+code_paths:
+  - cmd/mock-hr/**
+  - internal/mock-hr/**
+  - internal/domain/hr/**
+  - internal/shared/interactions/hr/**
+
+related:
+  designs:
+    - design.workspace-service
+    - design.workspace-service-api
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing the mock HR service, employee lookup contract, or
+  shared HR interaction client used by workspace-service.
+---
+
 # Mock HR Design
 
 ## Background

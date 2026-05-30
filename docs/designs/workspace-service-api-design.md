@@ -1,3 +1,34 @@
+---
+doc_id: design.workspace-service-api
+doc_type: design
+title: Workspace service API design
+status: implemented
+
+tags:
+  - workspace
+  - api
+  - hr
+
+code_paths:
+  - internal/workspace-service/**
+  - internal/domain/workspace/**
+  - internal/shared/interactions/hr/**
+  - cmd/workspace-service/**
+
+related:
+  designs:
+    - design.workspace-service
+    - design.workspace-service-command
+    - design.mock-hr
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing workspace create/read/favorite APIs, HR lookup
+  behavior, workspace persistence, or workspace response contracts.
+---
+
 # Workspace Service API Design
 
 ## Background

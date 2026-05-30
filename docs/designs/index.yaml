@@ -1,0 +1,312 @@
+version: 1
+documents:
+  - doc_id: design.function-resource-permissions
+    path: docs/designs/function-resource-permissions.md
+    title: Function resource permissions design
+    status: implemented
+    code_paths:
+      - internal/function-service/**
+      - cmd/function-service/**
+    tags:
+      - function
+      - permission
+      - api
+    summary: >
+      Read this when changing workspace/function permission configuration APIs, rule
+      persistence, or function_resource_permissions service behavior.
+  - doc_id: design.function-service
+    path: docs/designs/function-service.md
+    title: Function service design
+    status: implemented
+    code_paths:
+      - cmd/function-service/**
+      - internal/function-service/**
+      - internal/domain/resource/**
+      - internal/shared/eventbus/**
+    tags:
+      - function
+      - resource-projection
+    summary: >
+      Read this as the entry design for function-service resource projection,
+      workspace/function resource APIs, deletion behavior, and related extensions.
+  - doc_id: design.function-service-system-resource-api
+    path: docs/designs/function-service-system-resource-api-design.md
+    title: Function service system resource API design
+    status: implemented
+    code_paths:
+      - internal/function-service/**
+      - internal/domain/resource/**
+      - internal/shared/interactions/permission/**
+      - cmd/function-service/**
+    tags:
+      - function
+      - system-resource
+      - permission-registration
+    summary: >
+      Read this when changing system-scoped resource definition APIs, derived
+      resource attributes, or permission registration from function-service.
+  - doc_id: design.group-expiry-scheduler
+    path: docs/designs/group-expiry-scheduler.md
+    title: Group expiry scheduler design
+    status: implemented
+    code_paths:
+      - cmd/group-expiry-scheduler/**
+      - internal/group-expiry-scheduler/**
+      - internal/shared/repositories/expiry/**
+    tags:
+      - group
+      - expiry
+      - scheduler
+    summary: >
+      Read this when changing the group-expiry-scheduler service, expiry task
+      scanning, or scheduled publication of group expiry commands.
+  - doc_id: design.group-service
+    path: docs/designs/group-service.md
+    title: Group service design
+    status: implemented
+    code_paths:
+      - cmd/group-service/**
+      - internal/group-service/**
+      - internal/domain/group/**
+      - internal/shared/repositories/expiry/**
+    tags:
+      - group
+      - membership
+      - permission
+    summary: >
+      Read this as the entry design for group-service membership, grouping rules,
+      expiry workflows, system groups, and permission relationship projection.
+  - doc_id: design.group-service-group
+    path: docs/designs/group-service-group.md
+    title: Group API design
+    status: implemented
+    code_paths:
+      - internal/group-service/**
+      - internal/domain/group/**
+      - cmd/group-service/**
+    tags:
+      - group
+      - api
+    summary: >
+      Read this when changing workspace group create, read, soft-delete, dynamic
+      grouping rules, or group repository/service boundaries.
+  - doc_id: design.group-service-group-expiry-command
+    path: docs/designs/group-service-group-expiry-command.md
+    title: Group expiry command design
+    status: implemented
+    code_paths:
+      - internal/group-service/**
+      - internal/domain/group/**
+      - internal/shared/repositories/expiry/**
+      - cmd/group-service/**
+    tags:
+      - group
+      - expiry
+      - command
+    summary: >
+      Read this when changing grouping-rule expiry task persistence, expiry command
+      CloudEvents, or idempotent group expiry handling.
+  - doc_id: design.group-service-individual-member-expiry-command
+    path: docs/designs/group-service-individual-member-expiry-command.md
+    title: Group individual member expiry command design
+    status: implemented
+    code_paths:
+      - internal/group-service/**
+      - internal/domain/group/**
+      - internal/shared/repositories/expiry/**
+      - cmd/group-service/**
+    tags:
+      - group
+      - individual-members
+      - expiry
+    summary: >
+      Read this when changing individual-member expiry task persistence, expiry
+      command CloudEvents, or idempotent member expiry handling.
+  - doc_id: design.group-service-individual-members
+    path: docs/designs/group-service-individual-members.md
+    title: Group individual members API design
+    status: implemented
+    code_paths:
+      - internal/group-service/**
+      - internal/domain/group/**
+      - cmd/group-service/**
+    tags:
+      - group
+      - individual-members
+      - api
+    summary: >
+      Read this when changing explicit individual member APIs, membership
+      persistence, pagination, or individual member mutation behavior.
+  - doc_id: design.mock-function
+    path: docs/designs/mock-function.md
+    title: Mock function design
+    status: implemented
+    code_paths:
+      - cmd/mock-function/**
+      - internal/mock-function/**
+      - internal/domain/resource/**
+      - examples/nats/**
+    tags:
+      - mock
+      - function
+      - nats
+    summary: >
+      Read this when changing the mock function service, resource-create command
+      consumption, or function resource upsert event publication.
+  - doc_id: design.mock-hr
+    path: docs/designs/mock-hr.md
+    title: Mock HR design
+    status: implemented
+    code_paths:
+      - cmd/mock-hr/**
+      - internal/mock-hr/**
+      - internal/domain/hr/**
+      - internal/shared/interactions/hr/**
+    tags:
+      - mock
+      - hr
+    summary: >
+      Read this when changing the mock HR service, employee lookup contract, or
+      shared HR interaction client used by workspace-service.
+  - doc_id: design.permission-api-client
+    path: docs/designs/permission-api-client-design.md
+    title: Permission API client design
+    status: implemented
+    code_paths:
+      - internal/shared/interactions/permission/**
+      - internal/mock-permission-api/**
+      - cmd/mock-permission-api/**
+    tags:
+      - permission
+      - api-client
+      - interactions
+    summary: >
+      Read this when changing the shared permission HTTP API client, relationship
+      helper contracts, or mock permission API integration behavior.
+  - doc_id: design.permission-client
+    path: docs/designs/permission-client-design.md
+    title: Permission registration consumer interface design
+    status: implemented
+    code_paths:
+      - internal/function-service/services/**
+      - internal/shared/interactions/permission/**
+    tags:
+      - permission
+      - consumer-interface
+      - registration
+    summary: >
+      Read this when changing consumer-side permission registration interfaces or
+      function-service integration with shared permission interactions.
+  - doc_id: design.resource-command-event-contracts
+    path: docs/designs/resource-command-event-contracts.md
+    title: Resource command and event domain contracts
+    status: implemented
+    code_paths:
+      - internal/domain/resource/**
+      - internal/shared/eventbus/**
+      - internal/workspace-service/**
+      - internal/mock-function/**
+      - internal/function-service/**
+    tags:
+      - resource
+      - cloudevents
+      - contracts
+    summary: >
+      Read this when changing shared resource command/event payloads, CloudEvent
+      contracts, or cross-service resource lifecycle flows.
+  - doc_id: design.resource-input-validation-refactor
+    path: docs/designs/resource-input-validation-refactor.md
+    title: Resource input validation refactor design
+    status: implemented
+    code_paths:
+      - internal/domain/resource/**
+      - internal/function-service/**
+      - internal/workspace-service/**
+      - internal/mock-function/**
+    tags:
+      - resource
+      - validation
+      - refactor
+    summary: >
+      Read this when changing resource domain validation, transport-to-domain
+      parsing, or shared resource input invariants.
+  - doc_id: design.shared-pagination-helper-refactor
+    path: docs/designs/shared-pagination-helper-refactor.md
+    title: Shared pagination helper refactor
+    status: implemented
+    code_paths:
+      - internal/shared/pagination/**
+      - internal/*/handlers/**
+    tags:
+      - pagination
+      - shared
+      - refactor
+    summary: >
+      Read this when changing shared cursor pagination parsing, token handling, or
+      handler integration with the pagination helper.
+  - doc_id: design.system-group-api
+    path: docs/designs/system-group-api-design.md
+    title: System group API design
+    status: implemented
+    code_paths:
+      - internal/group-service/**
+      - internal/domain/group/**
+      - internal/shared/interactions/permission/**
+      - cmd/group-service/**
+    tags:
+      - group
+      - system
+      - permission
+    summary: >
+      Read this when changing system-scoped group APIs, system group persistence, or
+      permission relationship projection behavior.
+  - doc_id: design.workspace-service
+    path: docs/designs/workspace-service.md
+    title: Workspace service design
+    status: implemented
+    code_paths:
+      - cmd/workspace-service/**
+      - internal/workspace-service/**
+      - internal/domain/workspace/**
+      - internal/domain/resource/**
+      - internal/shared/interactions/hr/**
+      - internal/shared/eventbus/**
+    tags:
+      - workspace
+      - service
+      - resource-command
+    summary: >
+      Read this as the entry design for workspace-service APIs, workspace
+      persistence, HR lookup, favorite state, and resource command publishing.
+  - doc_id: design.workspace-service-api
+    path: docs/designs/workspace-service-api-design.md
+    title: Workspace service API design
+    status: implemented
+    code_paths:
+      - internal/workspace-service/**
+      - internal/domain/workspace/**
+      - internal/shared/interactions/hr/**
+      - cmd/workspace-service/**
+    tags:
+      - workspace
+      - api
+      - hr
+    summary: >
+      Read this when changing workspace create/read/favorite APIs, HR lookup
+      behavior, workspace persistence, or workspace response contracts.
+  - doc_id: design.workspace-service-command
+    path: docs/designs/workspace-service-command-design.md
+    title: Workspace service command design
+    status: implemented
+    code_paths:
+      - internal/workspace-service/**
+      - internal/domain/resource/**
+      - internal/shared/eventbus/**
+      - cmd/workspace-service/**
+    tags:
+      - workspace
+      - resource-command
+      - cloudevents
+    summary: >
+      Read this when changing workspace resource-create command publishing,
+      application mapping configuration, or command CloudEvent contracts.

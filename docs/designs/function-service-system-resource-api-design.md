@@ -1,3 +1,36 @@
+---
+doc_id: design.function-service-system-resource-api
+doc_type: design
+title: Function service system resource API design
+status: implemented
+
+tags:
+  - function
+  - system-resource
+  - permission-registration
+
+code_paths:
+  - internal/function-service/**
+  - internal/domain/resource/**
+  - internal/shared/interactions/permission/**
+  - cmd/function-service/**
+
+related:
+  designs:
+    - design.function-service
+    - design.function-resource-permissions
+    - design.permission-client
+    - design.permission-api-client
+    - design.resource-command-event-contracts
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing system-scoped resource definition APIs, derived
+  resource attributes, or permission registration from function-service.
+---
+
 # Function Service System Resource API Design
 
 ## Background

@@ -1,3 +1,36 @@
+---
+doc_id: design.resource-command-event-contracts
+doc_type: design
+title: Resource command and event domain contracts
+status: implemented
+
+tags:
+  - resource
+  - cloudevents
+  - contracts
+
+code_paths:
+  - internal/domain/resource/**
+  - internal/shared/eventbus/**
+  - internal/workspace-service/**
+  - internal/mock-function/**
+  - internal/function-service/**
+
+related:
+  designs:
+    - design.workspace-service-command
+    - design.mock-function
+    - design.function-service
+    - design.resource-input-validation-refactor
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing shared resource command/event payloads, CloudEvent
+  contracts, or cross-service resource lifecycle flows.
+---
+
 # Resource Command and Event Domain Contracts
 
 ## Background

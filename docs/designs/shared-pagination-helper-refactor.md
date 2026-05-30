@@ -1,3 +1,30 @@
+---
+doc_id: design.shared-pagination-helper-refactor
+doc_type: design
+title: Shared pagination helper refactor
+status: implemented
+
+tags:
+  - pagination
+  - shared
+  - refactor
+
+code_paths:
+  - internal/shared/pagination/**
+  - internal/*/handlers/**
+
+related:
+  designs:
+    - design.function-service
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing shared cursor pagination parsing, token handling, or
+  handler integration with the pagination helper.
+---
+
 # Shared Pagination Helper Refactor
 
 ## Background and Goals

@@ -1,3 +1,35 @@
+---
+doc_id: design.mock-function
+doc_type: design
+title: Mock function design
+status: implemented
+
+tags:
+  - mock
+  - function
+  - nats
+
+code_paths:
+  - cmd/mock-function/**
+  - internal/mock-function/**
+  - internal/domain/resource/**
+  - examples/nats/**
+
+related:
+  designs:
+    - design.workspace-service
+    - design.workspace-service-command
+    - design.function-service
+    - design.resource-command-event-contracts
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing the mock function service, resource-create command
+  consumption, or function resource upsert event publication.
+---
+
 # Mock Function Design
 
 ## Background

@@ -1,3 +1,36 @@
+---
+doc_id: design.group-service-individual-member-expiry-command
+doc_type: design
+title: Group individual member expiry command design
+status: implemented
+
+tags:
+  - group
+  - individual-members
+  - expiry
+
+code_paths:
+  - internal/group-service/**
+  - internal/domain/group/**
+  - internal/shared/repositories/expiry/**
+  - cmd/group-service/**
+
+related:
+  designs:
+    - design.group-service
+    - design.group-service-individual-members
+    - design.group-service-group-expiry-command
+    - design.group-expiry-scheduler
+    - design.group-service-group
+  adrs: []
+
+last_updated_at: 2026-05-30
+
+summary: >
+  Read this when changing individual-member expiry task persistence, expiry
+  command CloudEvents, or idempotent member expiry handling.
+---
+
 # Group Individual Member Expiry Command Design
 
 ## Background
